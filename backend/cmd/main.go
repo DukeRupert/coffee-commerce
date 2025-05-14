@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -9,6 +10,9 @@ import (
 	"github.com/dukerupert/coffee-commerce/internal/events"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/labstack/echo/v4"
 	_ "github.com/lib/pq"
 	"github.com/rs/zerolog"
@@ -44,6 +48,11 @@ func main() {
 	}
 	defer db.Close()
 
+	// Run migrations
+	if err := runMigrations(cfg, &logger); err != nil {
+		logger.Fatal().Err(err).Msg("Fatal migration error")
+	}
+
 	// Initialize event bus
 	logger.Info().Msg("Initializing event bus")
 	eventBus, err := events.NewNATSEventBus(cfg.MessageBus.URL, &logger)
@@ -57,4 +66,65 @@ func main() {
 		return c.String(http.StatusOK, "Hello, World!")
 	})
 	e.Logger.Fatal(e.Start(":8080"))
+}
+
+func runMigrations(cfg *config.Config, logger *zerolog.Logger) error {
+	// Run migrations
+	m, err := migrate.New(
+		"file://migrations",
+		cfg.DB.MigrateURL)
+	if err != nil {
+		logger.Error().Err(err).Str("migrateURL", cfg.DB.MigrateURL).Msg("Failed to create migration instance")
+		return fmt.Errorf("failed to create migration instance: %w", err)
+	}
+
+	// Log migration source and database URL
+	logger.Debug().
+		Str("source", "file://migrations").
+		Str("migrateURL", cfg.DB.MigrateURL).
+		Msg("Migration configuration")
+
+	// Get migration version before running
+	version, dirty, vErr := m.Version()
+	if vErr != nil && vErr != migrate.ErrNilVersion {
+		logger.Warn().Err(vErr).Msg("Failed to get current migration version")
+	} else if vErr == migrate.ErrNilVersion {
+		logger.Info().Msg("No migrations have been applied yet")
+	} else {
+		logger.Info().Uint("version", version).Bool("dirty", dirty).Msg("Current migration version")
+	}
+
+	// Run migrations
+	if err := m.Up(); err != nil {
+		if err == migrate.ErrNoChange {
+			logger.Info().Msg("No migration changes detected")
+		} else {
+			logger.Error().Err(err).Msg("Migration failed")
+			return fmt.Errorf("migration failed: %w", err)
+		}
+	} else {
+		// Get the new version after successful migration
+		newVersion, _, _ := m.Version()
+		logger.Info().Uint("new_version", newVersion).Msg("Database migrations completed successfully")
+	}
+
+	// Close the migration
+	srcErr, dbErr := m.Close()
+	if srcErr != nil {
+		logger.Warn().Err(srcErr).Msg("Error closing migration source")
+	}
+	if dbErr != nil {
+		logger.Warn().Err(dbErr).Msg("Error closing migration database connection")
+	}
+
+	// If both closing errors occurred, return a combined error
+	if srcErr != nil && dbErr != nil {
+		return fmt.Errorf("failed to close migration resources: %v, %v", srcErr, dbErr)
+	} else if srcErr != nil {
+		return fmt.Errorf("failed to close migration source: %w", srcErr)
+	} else if dbErr != nil {
+		return fmt.Errorf("failed to close migration database connection: %w", dbErr)
+	}
+
+	return nil
 }
