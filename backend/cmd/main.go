@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/dukerupert/coffee-commerce/config"
+	"github.com/dukerupert/coffee-commerce/internal/events"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 
 	"github.com/labstack/echo/v4"
@@ -42,6 +43,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("Failed to connect to database")
 	}
 	defer db.Close()
+
+	// Initialize event bus
+	logger.Info().Msg("Initializing event bus")
+	eventBus, err := events.NewNATSEventBus(cfg.MessageBus.URL, &logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize event bus")
+	}
+	defer eventBus.Close()
 
 	e := echo.New()
 	e.GET("/", func(c echo.Context) error {
