@@ -11,6 +11,7 @@ import (
 	"github.com/dukerupert/coffee-commerce/internal/events"
 	custommiddleware "github.com/dukerupert/coffee-commerce/internal/middleware"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
+	"github.com/dukerupert/coffee-commerce/internal/service"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -64,12 +65,17 @@ func main() {
 	}
 	defer eventBus.Close()
 
-	// Initialize repositories
+	// Initialize services
+	productService := service.NewProductService(&logger, eventBus)
 
-	// Initalize services
+	variantService, err := service.NewVariantService(&logger, eventBus)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize variant service")
+	}
+	_ = variantService // Using this to avoid unused variable warning
 
 	// Initialize handlers
-	productHandler := handler.NewProductHandler(&logger)
+	productHandler := handler.NewProductHandler(&logger, productService)
 
 	// Start echo server
 	e := echo.New()

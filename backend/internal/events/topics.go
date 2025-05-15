@@ -10,6 +10,11 @@ const (
 	TopicProductLowStock     = "products.low_stock"
 )
 
+// Product-related topics
+const (
+	TopicVariantCreated      = "variants.created"
+)
+
 // Customer-related topics
 const (
 	TopicCustomerCreated = "customers.created"

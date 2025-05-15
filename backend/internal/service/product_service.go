@@ -1,36 +1,44 @@
-// internal/services/product_service.go
-package services
+// internal/service/product_service.go
+package service
 
 import (
-	"context"
-
-	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
-	"github.com/dukerupert/coffee-commerce/internal/domain/model"
+	"github.com/dukerupert/coffee-commerce/internal/events"
 	"github.com/rs/zerolog"
 )
 
-// ProductService defines the interface for product business logic
+// ProductService defines the interface for product-related operations
 type ProductService interface {
-	Create(ctx context.Context, productDTO *dto.ProductCreateDTO) (*model.Product, error)
-	List(ctx context.Context, page, pageSize int, includeInactive bool) ([]*model.Product, int, error)
+	Create() error
+	// Other methods will be added later
 }
 
-// productService is the private implementation of ProductService
+// productService implements ProductService
 type productService struct {
-	logger zerolog.Logger
+	logger   zerolog.Logger
+	eventBus events.EventBus
 }
 
-// NewProductService creates a new instance of ProductService
-func NewProductService(logger *zerolog.Logger) *productService {
+// NewProductService creates a new product service
+func NewProductService(logger *zerolog.Logger, eventBus events.EventBus) ProductService {
+	subLogger := logger.With().Str("component", "product_service").Logger()
 	return &productService{
-		logger: logger.With().Str("component", "product_service").Logger(),
+		logger:   subLogger,
+		eventBus: eventBus,
 	}
 }
 
-func (s *productService) Create(ctx context.Context, productDTO *dto.ProductCreateDTO) (*model.Product, error) {
-	return nil, nil
-}
-
-func (s *productService) List(ctx context.Context, page, pageSize int, includeInactive bool) ([]*model.Product, int, error) {
-	return nil, 0, nil
+// Create initiates the product creation flow by publishing an event
+func (s *productService) Create() error {
+	s.logger.Info().Msg("Creating product")
+	
+	// Publish product created event
+	// Note: We're publishing an empty payload for now
+	err := s.eventBus.Publish(events.TopicProductCreated, struct{}{})
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to publish product created event")
+		return err
+	}
+	
+	s.logger.Info().Str("topic", events.TopicProductCreated).Msg("Published product created event")
+	return nil
 }

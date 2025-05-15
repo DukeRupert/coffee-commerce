@@ -3,6 +3,8 @@ package handler
 import (
 	"net/http"
 
+	"github.com/dukerupert/coffee-commerce/internal/service"
+
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog"
 )
@@ -18,14 +20,16 @@ type ProductHandler interface {
 
 // ProductHandler handles HTTP requests for products
 type productHandler struct {
-	logger zerolog.Logger
+	logger        zerolog.Logger
+	productService service.ProductService
 }
 
 // NewProductHandler creates a new product handler
-func NewProductHandler(logger *zerolog.Logger) *productHandler {
+func NewProductHandler(logger *zerolog.Logger, productService service.ProductService) *productHandler {
 	sublogger := logger.With().Str("component", "product_handler").Logger()
 	return &productHandler{
-		logger: sublogger,
+		logger:        sublogger,
+		productService: productService,
 	}
 }
 
@@ -40,7 +44,19 @@ func (h *productHandler) Create(c echo.Context) error {
 		Str("path", c.Request().URL.Path).
 		Str("remote_addr", c.Request().RemoteAddr).
 		Msg("Handling product creation request")
-	return c.String(http.StatusOK, "Hello, World!")
+	
+	// Call product service to create the product
+	err := h.productService.Create()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to create product")
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create product",
+		})
+	}
+	
+	return c.JSON(http.StatusCreated, map[string]string{
+		"message": "Product creation initiated",
+	})
 }
 
 // Get handles GET /api/products/:id
