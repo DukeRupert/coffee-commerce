@@ -36,7 +36,8 @@ func Connect(dbConfig config.DBConfig, logger *zerolog.Logger) (*DB, error) {
 
 	// Check if our database exists
 	var exists bool
-	err = baseDB.QueryRow("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)", "coffee_subscriptions").Scan(&exists)
+	err = baseDB.QueryRow("SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_database WHERE lower(datname) = lower($1))", dbConfig.Name).Scan(&exists)
+	logger.Info().Bool("exists", exists).Str("db name", dbConfig.Name)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to check if database exists")
 	}
