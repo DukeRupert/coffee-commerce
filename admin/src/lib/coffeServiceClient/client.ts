@@ -1,4 +1,5 @@
 // CoffeeServiceClient.ts
+import type { CreateProductRequest } from "./interface";
 
 /**
  * Response structure for paginated API responses
@@ -59,7 +60,10 @@ export interface CoffeeServiceClientOptions {
   /**
    * Authorization token for authenticated requests
    */
-  authToken?: string;
+  authToken?: string;  /**
+   * Custom fetch implementation (for proxying, testing, etc.)
+   */
+  customFetch?: typeof fetch;
 }
 
 /**
@@ -108,6 +112,7 @@ export class CoffeeServiceClient {
   private timeout: number;
   private apiVersion: string;
   private authToken?: string;
+  private fetchImpl: typeof fetch;
 
   /**
    * Create a new instance of the Coffee Service API client
@@ -120,6 +125,7 @@ export class CoffeeServiceClient {
     this.timeout = options.timeout || 10000;
     this.apiVersion = options.apiVersion || 'v1';
     this.authToken = options.authToken;
+    this.fetchImpl = options.customFetch || fetch;
   }
 
   /**
@@ -211,7 +217,7 @@ export class CoffeeServiceClient {
     const url = this.createUrl('/products/', params);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: 'GET',
         headers: this.getHeaders(),
         signal: AbortSignal.timeout(this.timeout),
@@ -221,6 +227,136 @@ export class CoffeeServiceClient {
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Failed to fetch products: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new product
+   * @param productData Data for the new product
+   * @returns Promise with the created product data
+   */
+  public async createProduct(productData: CreateProductRequest): Promise<Product> {
+    const url = this.createUrl('/products/');
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(productData),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      return this.handleResponse<Product>(response);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to create product: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get a single product by ID
+   * @param productId ID of the product to retrieve
+   * @returns Promise with the product data
+   */
+  public async getProduct(productId: string): Promise<Product> {
+    const url = this.createUrl(`/products/${productId}/`);
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers: this.getHeaders(),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      return this.handleResponse<Product>(response);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch product: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update an existing product
+   * @param productId ID of the product to update
+   * @param productData New data for the product
+   * @returns Promise with the updated product data
+   */
+  public async updateProduct(productId: string, productData: Partial<CreateProductRequest>): Promise<Product> {
+    const url = this.createUrl(`/products/${productId}/`);
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: JSON.stringify(productData),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      return this.handleResponse<Product>(response);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to update product: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a product
+   * @param productId ID of the product to delete
+   * @returns Promise with the deletion status
+   */
+  public async deleteProduct(productId: string): Promise<void> {
+    const url = this.createUrl(`/products/${productId}/`);
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'DELETE',
+        headers: this.getHeaders(),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+      
+      // For DELETE operations, often there's no response body
+      if (response.status === 204) {
+        return;
+      }
+      
+      return this.handleResponse<void>(response);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to delete product: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update a product's stock level
+   * @param productId ID of the product to update
+   * @param stockLevel New stock level
+   * @returns Promise with the updated product data
+   */
+  public async updateProductStock(productId: string, stockLevel: number): Promise<Product> {
+    const url = this.createUrl(`/products/${productId}/stock/`);
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ stock_level: stockLevel }),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      return this.handleResponse<Product>(response);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to update product stock: ${error.message}`);
       }
       throw error;
     }
