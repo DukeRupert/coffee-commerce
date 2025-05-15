@@ -104,6 +104,17 @@ func main() {
 	e.Pre(middleware.AddTrailingSlash())
 	e.Use(middleware.RequestID())
 	e.Use(custommiddleware.RequestLogger(&logger))
+		corsConfig := custommiddleware.CORSConfig{
+		AllowOrigins: []string{
+			"https://orange-goldfish-wg644q6vqxv295gg-5173.app.github.dev", // Your frontend origin
+			"http://localhost:5173",                                         // Local development
+			"*",                                                             // Allow all origins (for development)
+		},
+		AllowMethods: []string{
+			echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.PATCH, echo.OPTIONS,
+		},
+	}
+	e.Use(custommiddleware.SetupCORS(corsConfig))
 
 	api := e.Group("/api")
 	v1 := api.Group("/v1")
