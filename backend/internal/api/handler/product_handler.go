@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/service"
 
 	"github.com/labstack/echo/v4"
@@ -20,7 +21,7 @@ type ProductHandler interface {
 
 // ProductHandler handles HTTP requests for products
 type productHandler struct {
-	logger        zerolog.Logger
+	logger         zerolog.Logger
 	productService service.ProductService
 }
 
@@ -28,7 +29,7 @@ type productHandler struct {
 func NewProductHandler(logger *zerolog.Logger, productService service.ProductService) *productHandler {
 	sublogger := logger.With().Str("component", "product_handler").Logger()
 	return &productHandler{
-		logger:        sublogger,
+		logger:         sublogger,
 		productService: productService,
 	}
 }
@@ -44,7 +45,7 @@ func (h *productHandler) Create(c echo.Context) error {
 		Str("path", c.Request().URL.Path).
 		Str("remote_addr", c.Request().RemoteAddr).
 		Msg("Handling product creation request")
-	
+
 	// Call product service to create the product
 	err := h.productService.Create()
 	if err != nil {
@@ -53,7 +54,7 @@ func (h *productHandler) Create(c echo.Context) error {
 			"error": "Failed to create product",
 		})
 	}
-	
+
 	return c.JSON(http.StatusCreated, map[string]string{
 		"message": "Product creation initiated",
 	})
@@ -79,8 +80,61 @@ func (h *productHandler) Get(c echo.Context) error {
 
 // List handles GET /api/products
 func (h *productHandler) List(c echo.Context) error {
-	h.logger.Info().Str("handler", "ProductHandler.List").Msg("Handling product list request")
-	return c.String(http.StatusOK, "Hello, World!")
+	ctx := c.Request().Context()
+	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
+
+	h.logger.Debug().
+		Str("handler", "ProductHandler.List").
+		Str("request_id", requestID).
+		Str("method", c.Request().Method).
+		Str("path", c.Request().URL.Path).
+		Str("remote_addr", c.Request().RemoteAddr).
+		Msg("Handling product listing request")
+
+	// 1. Parse pagination parameters
+	params := api.NewParams(c)
+
+	// 2. Parse additional filtering parameters
+	includeInactive := false
+	if c.QueryParam("include_inactive") == "true" {
+		// todo: Only admins to see inactive products
+		includeInactive = true
+		h.logger.Debug().
+			Str("handler", "ProductHandler.List").
+			Str("request_id", requestID).
+			Bool("include_inactive", includeInactive).
+			Msg("Including inactive products in results")
+	}
+
+	// 2. Call productService.List
+	products, total, err := h.productService.List(ctx, params.Offset, params.PerPage, includeInactive)
+	if err != nil {
+		h.logger.Error().
+			Str("handler", "ProductHandler.List").
+			Str("request_id", requestID).
+			Err(err).
+			Int("offset", params.Offset).
+			Int("per_page", params.PerPage).
+			Bool("include_inactive", includeInactive).
+			Msg("Failed to retrieve products from service")
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve products")
+	}
+
+	// 3. Create paginated response
+	meta := api.NewMeta(params, total)
+	response := api.Response(products, meta)
+
+	h.logger.Info().
+		Str("handler", "ProductHandler.List").
+		Str("request_id", requestID).
+		Int("products_count", len(products)).
+		Int("total_count", total).
+		Int("page", params.Page).
+		Int("per_page", params.PerPage).
+		Int("status_code", http.StatusOK).
+		Msg("Product listing successfully returned")
+
+	return c.JSON(http.StatusOK, response)
 }
 
 // Update handles PUT /api/products/:id

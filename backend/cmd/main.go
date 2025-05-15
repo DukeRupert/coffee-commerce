@@ -82,8 +82,11 @@ func main() {
 	)
 	defer eventBus.Close()
 
+	// Initialize repositories
+	productRepo := postgres.NewProductRepository(db, &logger)
+
 	// Initialize services
-	productService := service.NewProductService(&logger, eventBus)
+	productService := service.NewProductService(&logger, eventBus, productRepo)
 
 	variantService, err := service.NewVariantService(&logger, eventBus)
 	if err != nil {
