@@ -7,13 +7,16 @@ import (
 	"os"
 
 	"github.com/dukerupert/coffee-commerce/config"
+	"github.com/dukerupert/coffee-commerce/internal/api/handler"
 	"github.com/dukerupert/coffee-commerce/internal/events"
+	custommiddleware "github.com/dukerupert/coffee-commerce/internal/middleware"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
 	"github.com/rs/zerolog"
 )
@@ -61,10 +64,31 @@ func main() {
 	}
 	defer eventBus.Close()
 
+	// Initialize repositories
+
+	// Initalize services
+
+	// Initialize handlers
+	productHandler := handler.NewProductHandler(&logger)
+
+	// Start echo server
 	e := echo.New()
+
+	// middleware
+	e.Pre(middleware.AddTrailingSlash())
+	e.Use(middleware.RequestID())
+	e.Use(custommiddleware.RequestLogger(&logger))
+
+	api := e.Group("/api")
+	v1 := api.Group("/v1")
+	products := v1.Group("/products")
+	products.GET("/", productHandler.List)
+	products.POST("/", productHandler.Create)
+
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
 	})
+
 	e.Logger.Fatal(e.Start(":8080"))
 }
 
