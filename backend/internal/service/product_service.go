@@ -2,7 +2,7 @@
 package service
 
 import (
-	"github.com/dukerupert/coffee-commerce/internal/events"
+	"github.com/dukerupert/coffee-commerce/internal/event"
 	"github.com/rs/zerolog"
 )
 

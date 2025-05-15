@@ -1,4 +1,4 @@
-// internal/events/bus.go
+// internal/event/bus.go
 package events
 
 import (
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dukerupert/coffee-commerce/internal/metrics"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
@@ -28,9 +29,12 @@ type EventBus interface {
 
 // NATSEventBus implements EventBus using NATS
 type NATSEventBus struct {
-	conn      *nats.Conn
-	jetStream nats.JetStreamContext
-	logger    zerolog.Logger
+	conn          *nats.Conn
+	jetStream     nats.JetStreamContext
+	logger        zerolog.Logger
+	metrics       *metrics.EventMetrics
+	serviceName   string
+	subscriptions map[string][]*nats.Subscription
 }
 
 // Event represents a message in the event bus
@@ -42,7 +46,7 @@ type Event struct {
 }
 
 // NewNATSEventBus creates a new NATS-based event bus
-func NewNATSEventBus(natsURL string, logger *zerolog.Logger) (*NATSEventBus, error) {
+func NewNATSEventBus(natsURL string, logger *zerolog.Logger, metrics *metrics.EventMetrics, serviceName string) (*NATSEventBus, error) {
 	subLogger := logger.With().Str("component", "nats_event_bus").Logger()
 
 	// Connect to NATS
@@ -59,6 +63,9 @@ func NewNATSEventBus(natsURL string, logger *zerolog.Logger) (*NATSEventBus, err
 		}),
 		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
 			subLogger.Error().Err(err).Msg("NATS error")
+			if metrics != nil {
+				metrics.EventsErrorCount.WithLabelValues(sub.Subject, serviceName, "subscription_error").Inc()
+			}
 		}),
 	)
 	if err != nil {
@@ -75,9 +82,12 @@ func NewNATSEventBus(natsURL string, logger *zerolog.Logger) (*NATSEventBus, err
 	subLogger.Info().Msg("Successfully connected to NATS")
 
 	return &NATSEventBus{
-		conn:      nc,
-		jetStream: js,
-		logger:    subLogger,
+		conn:          nc,
+		jetStream:     js,
+		logger:        subLogger,
+		metrics:       metrics,
+		serviceName:   serviceName,
+		subscriptions: make(map[string][]*nats.Subscription),
 	}, nil
 }
 
@@ -94,6 +104,9 @@ func (n *NATSEventBus) Publish(topic string, payload interface{}) error {
 	// Marshal the event to JSON
 	data, err := json.Marshal(event)
 	if err != nil {
+		if n.metrics != nil {
+			n.metrics.EventsErrorCount.WithLabelValues(topic, n.serviceName, "marshal_error").Inc()
+		}
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
@@ -104,7 +117,18 @@ func (n *NATSEventBus) Publish(topic string, payload interface{}) error {
 		Msg("Publishing event")
 
 	// Publish the event
-	return n.conn.Publish(topic, data)
+	err = n.conn.Publish(topic, data)
+	
+	// Record metrics
+	if n.metrics != nil {
+		if err != nil {
+			n.metrics.EventsErrorCount.WithLabelValues(topic, n.serviceName, "publish_error").Inc()
+		} else {
+			n.metrics.EventsPublished.WithLabelValues(topic, n.serviceName).Inc()
+		}
+	}
+	
+	return err
 }
 
 // PublishPersistent publishes an event that will be stored in JetStream
@@ -120,6 +144,9 @@ func (n *NATSEventBus) PublishPersistent(topic string, payload interface{}) erro
 	// Marshal the event to JSON
 	data, err := json.Marshal(event)
 	if err != nil {
+		if n.metrics != nil {
+			n.metrics.EventsErrorCount.WithLabelValues(topic, n.serviceName, "marshal_error").Inc()
+		}
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
@@ -141,12 +168,25 @@ func (n *NATSEventBus) PublishPersistent(topic string, payload interface{}) erro
 			MaxAge:   time.Hour * 24 * 30, // 30 days retention
 		})
 		if err != nil {
+			if n.metrics != nil {
+				n.metrics.EventsErrorCount.WithLabelValues(topic, n.serviceName, "create_stream_error").Inc()
+			}
 			return fmt.Errorf("failed to create stream: %w", err)
 		}
 	}
 
 	// Publish the event with acknowledgment
 	_, err = n.jetStream.Publish("events."+topic, data)
+	
+	// Record metrics
+	if n.metrics != nil {
+		if err != nil {
+			n.metrics.EventsErrorCount.WithLabelValues(topic, n.serviceName, "publish_persistent_error").Inc()
+		} else {
+			n.metrics.EventsPublished.WithLabelValues(topic, n.serviceName).Inc()
+		}
+	}
+	
 	return err
 }
 
@@ -156,22 +196,62 @@ func (n *NATSEventBus) Subscribe(topic string, handler func([]byte)) (*nats.Subs
 		Str("topic", topic).
 		Msg("Subscribing to topic")
 
-	// Subscribe to the topic
-	return n.conn.Subscribe(topic, func(msg *nats.Msg) {
+	// Create a wrapped handler that includes metrics
+	wrappedHandler := func(msg *nats.Msg) {
+		startTime := time.Now()
+		
 		n.logger.Debug().
 			Str("topic", topic).
 			Int("data_size", len(msg.Data)).
 			Msg("Received message")
+			
+		// Record metrics for received event
+		if n.metrics != nil {
+			n.metrics.EventsReceived.WithLabelValues(topic, n.serviceName).Inc()
+		}
 
 		// Call the handler with the message data
 		handler(msg.Data)
-	})
+		
+		// Record processing time
+		if n.metrics != nil {
+			processingTime := time.Since(startTime).Seconds()
+			n.metrics.EventProcessTime.WithLabelValues(topic, n.serviceName).Observe(processingTime)
+		}
+	}
+
+	// Subscribe to the topic
+	sub, err := n.conn.Subscribe(topic, wrappedHandler)
+	if err != nil {
+		if n.metrics != nil {
+			n.metrics.EventsErrorCount.WithLabelValues(topic, n.serviceName, "subscribe_error").Inc()
+		}
+		return nil, err
+	}
+	
+	// Track subscriber count
+	if n.metrics != nil {
+		n.subscriptions[topic] = append(n.subscriptions[topic], sub)
+		n.metrics.ActiveSubscribers.WithLabelValues(topic).Inc()
+	}
+	
+	return sub, nil
 }
 
 // Close closes the connection to NATS
 func (n *NATSEventBus) Close() {
 	if n.conn != nil {
 		n.logger.Debug().Msg("Closing NATS connection")
+		
+		// Update subscriber metrics
+		if n.metrics != nil {
+			for topic, subs := range n.subscriptions {
+				for range subs {
+					n.metrics.ActiveSubscribers.WithLabelValues(topic).Dec()
+				}
+			}
+		}
+		
 		n.conn.Close()
 	}
 }

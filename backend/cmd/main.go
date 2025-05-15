@@ -8,7 +8,8 @@ import (
 
 	"github.com/dukerupert/coffee-commerce/config"
 	"github.com/dukerupert/coffee-commerce/internal/api/handler"
-	"github.com/dukerupert/coffee-commerce/internal/events"
+	"github.com/dukerupert/coffee-commerce/internal/event"
+	"github.com/dukerupert/coffee-commerce/internal/metrics"
 	custommiddleware "github.com/dukerupert/coffee-commerce/internal/middleware"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/dukerupert/coffee-commerce/internal/service"
@@ -19,6 +20,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 )
 
@@ -32,6 +34,7 @@ func main() {
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	debug := flag.Bool("debug", false, "sets log level to debug")
+	metricsAddr := flag.String("metrics-addr", ":9090", "The address the metrics server binds to")
 
 	flag.Parse()
 	// Default level for this example is info, unless debug flag is present
@@ -57,12 +60,26 @@ func main() {
 		logger.Fatal().Err(err).Msg("Fatal migration error")
 	}
 
+	// Initialize metrics
+	eventMetrics := metrics.NewEventMetrics()
+
+	// Start metrics server
+	go func() {
+		logger.Info().Str("addr", *metricsAddr).Msg("Starting metrics server")
+		http.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(*metricsAddr, nil); err != nil {
+			logger.Fatal().Err(err).Msg("Failed to start metrics server")
+		}
+	}()
+
 	// Initialize event bus
 	logger.Info().Msg("Initializing event bus")
-	eventBus, err := events.NewNATSEventBus(cfg.MessageBus.URL, &logger)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to initialize event bus")
-	}
+	eventBus, err := events.NewNATSEventBus(
+		cfg.MessageBus.URL, 
+		&logger, 
+		eventMetrics, 
+		"main-service",
+	)
 	defer eventBus.Close()
 
 	// Initialize services

@@ -4,7 +4,7 @@ package service
 import (
 	"encoding/json"
 	
-	"github.com/dukerupert/coffee-commerce/internal/events"
+	"github.com/dukerupert/coffee-commerce/internal/event"
 	"github.com/rs/zerolog"
 )
 
