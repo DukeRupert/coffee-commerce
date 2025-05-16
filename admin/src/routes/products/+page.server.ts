@@ -1,7 +1,5 @@
-import type { PageServerLoad, Actions } from './$types';
+import type { PageServerLoad } from './$types';
 import client from "$lib/client"
-import { fail, redirect } from '@sveltejs/kit';
-import type { CreateProductRequest } from '$lib/coffeServiceClient/interface';
 
 /**
  * Page load function for the products page
@@ -49,66 +47,3 @@ export const load: PageServerLoad = async ({ url }) => {
         };
     }
 };
-
-export const actions = {
-    default: async ({ request }) => {
-        // Get form data
-        const formData = await request.formData();
-
-        // Validate required fields
-        const name = formData.get('name')?.toString();
-        if (!name || name.trim() === '') {
-            return fail(400, {
-                error: 'Product name is required',
-                values: Object.fromEntries(formData)
-            });
-        }
-
-        const description = formData.get('description')?.toString();
-        if (!description || description.trim() === '') {
-            return fail(400, {
-                error: 'Description is required',
-                values: Object.fromEntries(formData)
-            });
-        }
-
-        // Extract other form fields
-        const weightOptions = formData.getAll('weight_options').map(option => option.toString());
-        const grindOptions = formData.getAll('grind_options').map(option => option.toString());
-
-        // Build product data object
-        const productData: CreateProductRequest = {
-            name,
-            description,
-            origin: formData.get('origin')?.toString(),
-            roast_level: formData.get('roast_level')?.toString(),
-            flavor_notes: formData.get('flavor_notes')?.toString(),
-            image_url: formData.get('image_url')?.toString(),
-            stock_level: parseInt(formData.get('stock_level')?.toString() || '0', 10),
-            active: formData.get('active') === 'on' || formData.get('active') === 'true',
-            allow_subscription: formData.get('allow_subscription') === 'on' || formData.get('allow_subscription') === 'true',
-            options: {
-                weights: weightOptions.length > 0 ? weightOptions : undefined,
-                grinds: grindOptions.length > 0 ? grindOptions : undefined
-            }
-        };
-
-        try {
-            // Call the client createProduct method
-            const result = await client.createProduct(productData);
-            console.log(`Create Product success: \n ${result}`)
-            // Redirect to the product list page with a success notification
-            return redirect(303, '/products?created=true');
-        } catch (error) {
-            console.error('Failed to create product:', error);
-
-            // Return error information to the form
-            return fail(500, {
-                error: error instanceof Error
-                    ? `API Error: ${error.message}`
-                    : 'An unexpected error occurred',
-                values: Object.fromEntries(formData)
-            });
-        }
-    }
-} satisfies Actions;

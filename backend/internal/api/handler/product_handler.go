@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/dukerupert/coffee-commerce/internal/api"
+	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
+	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/dukerupert/coffee-commerce/internal/service"
 
 	"github.com/labstack/echo/v4"
@@ -36,6 +39,7 @@ func NewProductHandler(logger *zerolog.Logger, productService service.ProductSer
 
 // Create handles POST /api/products
 func (h *productHandler) Create(c echo.Context) error {
+	ctx := c.Request().Context()
 	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
 
 	h.logger.Info().
@@ -46,17 +50,79 @@ func (h *productHandler) Create(c echo.Context) error {
 		Str("remote_addr", c.Request().RemoteAddr).
 		Msg("Handling product creation request")
 
-	// Call product service to create the product
-	err := h.productService.Create()
-	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to create product")
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "Failed to create product",
+	// Parse the request body
+	var productDTO dto.ProductCreateDTO
+	if err := c.Bind(&productDTO); err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("request_id", requestID).
+			Msg("Failed to parse request body")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Message: "Invalid request format",
+			Code:    "INVALID_FORMAT",
 		})
 	}
 
-	return c.JSON(http.StatusCreated, map[string]string{
-		"message": "Product creation initiated",
+	// Validate using the existing Valid method
+	validationErrors := productDTO.Valid(c.Request().Context())
+	if len(validationErrors) > 0 {
+		h.logger.Warn().
+			Interface("validation_errors", validationErrors).
+			Str("request_id", requestID).
+			Msg("Product validation failed")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Message:          "Validation failed",
+			ValidationErrors: validationErrors,
+			Code:             "VALIDATION_ERROR",
+		})
+	}
+
+	// Call product service to create the product
+	product, err := h.productService.Create(ctx, &productDTO)
+	if err != nil {
+		h.logger.Error().
+			Err(err).
+			Str("request_id", requestID).
+			Msg("Failed to create product")
+
+		// Handle specific error types
+		switch {
+		case errors.Is(err, postgres.ErrDuplicateName):
+			return c.JSON(http.StatusConflict, api.ErrorResponse{
+				Message: "A product with this name already exists",
+				Code:    "DUPLICATE_PRODUCT",
+				ValidationErrors: map[string]string{
+					"name": "This product name is already in use",
+				},
+			})
+
+		case errors.Is(err, postgres.ErrDatabaseConnection):
+			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+				Message: "Service temporarily unavailable, please try again later",
+				Code:    "SERVICE_UNAVAILABLE",
+			})
+
+		case errors.Is(err, service.ErrInsufficientPermissions):
+			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+				Message: "You don't have permission to create products",
+				Code:    "FORBIDDEN",
+			})
+
+		default:
+			// Generic server error
+			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Message: "Failed to create product",
+				Code:    "INTERNAL_ERROR",
+			})
+		}
+	}
+
+	// Return success response with the created product ID
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"message": "Product created successfully",
+		"product": product,
 	})
 }
 

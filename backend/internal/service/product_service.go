@@ -5,16 +5,17 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	"github.com/dukerupert/coffee-commerce/internal/event"
-	"github.com/dukerupert/coffee-commerce/internal/interfaces"
+	"github.com/dukerupert/coffee-commerce/internal/repository/interface"
 	"github.com/rs/zerolog"
 )
 
 // ProductService defines the interface for product-related operations
 type ProductService interface {
 	// Create(ctx context.Context, productDTO *dto.ProductCreateDTO) (*models.Product, error)
-	Create() error
+	Create(ctx context.Context, product *dto.ProductCreateDTO) (*model.Product, error)
 	// GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
 	List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error)
 	// Update(ctx context.Context, id uuid.UUID, productDTO *dto.ProductUpdateDTO) (*models.Product, error)
@@ -26,7 +27,7 @@ type ProductService interface {
 type productService struct {
 	logger      zerolog.Logger
 	eventBus    events.EventBus
-	productRepo interfaces.ProductRepository
+	repo 		interfaces.ProductRepository
 }
 
 // NewProductService creates a new product service
@@ -35,24 +36,70 @@ func NewProductService(logger *zerolog.Logger, eventBus events.EventBus, product
 	return &productService{
 		logger:      subLogger,
 		eventBus:    eventBus,
-		productRepo: productRepo,
+		repo: productRepo,
 	}
 }
 
-// Create initiates the product creation flow by publishing an event
-func (s *productService) Create() error {
-	s.logger.Info().Msg("Creating product")
+// Create initiates the product creation flow by saving to database and publishing an event
+func (s *productService) Create(ctx context.Context, p *dto.ProductCreateDTO) (*model.Product, error) {
+	s.logger.Info().
+		Str("product_name", p.Name).
+		Str("origin", p.Origin).
+		Str("roast_level", p.RoastLevel).
+		Msg("Creating product")
 
-	// Publish product created event
-	// Note: We're publishing an empty payload for now
-	err := s.eventBus.Publish(events.TopicProductCreated, struct{}{})
+	// Convert dto to model
+	product := p.ToModel()
+
+	// Check if a product with the same name already exists
+    existingProduct, err := s.repo.GetByName(ctx, product.Name)
+    if err != nil {
+        s.logger.Error().Err(err).Msg("Error checking for existing product")
+        return product, fmt.Errorf("error checking for existing product: %w", err)
+    }
+
+    if existingProduct != nil {
+        s.logger.Warn().
+            Str("product_name", product.Name).
+            Str("existing_id", existingProduct.ID.String()).
+            Msg("Product with this name already exists")
+        return product, fmt.Errorf("a product with the name '%s' already exists", product.Name)
+    }
+
+	// Save product to database using repository
+	err = s.repo.Create(ctx, product)
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to publish product created event")
-		return err
+		s.logger.Error().Err(err).Msg("Failed to save product to database")
+		return product, fmt.Errorf("failed to create product: %w", err)
 	}
 
-	s.logger.Info().Str("topic", events.TopicProductCreated).Msg("Published product created event")
-	return nil
+	// Create event payload with important product details
+	payload := events.ProductCreatedPayload{
+		ProductID:   product.ID.String(),
+		Name:        product.Name,
+		Description: product.Description,
+		StockLevel:  product.StockLevel,
+		Origin:      product.Origin,
+		RoastLevel:  product.RoastLevel,
+		Active:      product.Active,
+		StripeID:    product.StripeID,
+		CreatedAt:   product.CreatedAt,
+	}
+
+	// Publish product created event with detailed payload
+	err = s.eventBus.Publish(events.TopicProductCreated, payload)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to publish product created event")
+		// Note: We don't return error here since the product was already saved to DB
+		// Consider adding a mechanism to retry publishing the event
+	}
+
+	s.logger.Info().
+		Str("topic", events.TopicProductCreated).
+		Str("product_id", product.ID.String()).
+		Msg("Published product created event")
+	
+	return product, nil
 }
 
 func (s *productService) List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error) {
@@ -63,7 +110,7 @@ func (s *productService) List(ctx context.Context, offset, limit int, includeIna
 		Bool("includeInactive", includeInactive).
 		Msg("Starting product listing")
 
-	products, total, err := s.productRepo.List(ctx, offset, limit, includeInactive)
+	products, total, err := s.repo.List(ctx, offset, limit, includeInactive)
 	if err != nil {
 		s.logger.Error().
 			Str("function", "productService.List").

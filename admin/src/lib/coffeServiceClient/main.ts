@@ -1,5 +1,6 @@
 // CoffeeServiceClient.ts
 import type { CreateProductRequest } from "./interface";
+import { ApiError, type ApiErrorResponse } from "./error";
 
 /**
  * Response structure for paginated API responses
@@ -174,16 +175,48 @@ export class CoffeeServiceClient {
    * @returns Parsed response data
    * @throws Error if the response is not successful
    */
-  private async handleResponse<T>(response: Response): Promise<T> {
+  public async handleResponse<T>(response: Response): Promise<T> {
+    const contentType = response.headers.get('content-type');
+    const isJson = contentType && contentType.includes('application/json');
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      throw new Error(
-        `API error: ${response.status} ${response.statusText}${errorData ? ` - ${JSON.stringify(errorData)}` : ''
-        }`
-      );
+      let errorResponse: ApiErrorResponse;
+
+      if (isJson) {
+        try {
+          const errorData = await response.json();
+          errorResponse = {
+            status: response.status,
+            message: errorData.message || response.statusText,
+            validationErrors: errorData.validationErrors,
+            code: errorData.code,
+          };
+        } catch (e) {
+          errorResponse = {
+            status: response.status,
+            message: `Request failed with status ${response.status}`
+          };
+        }
+      } else {
+        const text = await response.text();
+        errorResponse = {
+          status: response.status,
+          message: text || response.statusText
+        };
+      }
+
+      throw new ApiError(errorResponse);
     }
 
-    return response.json() as Promise<T>;
+    // Handle successful response
+    if (isJson) {
+      return await response.json() as T;
+    } else if (response.status === 204) {
+      return {} as T; // No content
+    } else {
+      const text = await response.text();
+      return text as unknown as T;
+    }
   }
 
   /**
@@ -251,10 +284,20 @@ export class CoffeeServiceClient {
 
       return this.handleResponse<Product>(response);
     } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to create product: ${error.message}`);
+      if (error instanceof ApiError) {
+        // Already formatted, just rethrow
+        throw error;
       }
-      throw error;
+      if (error instanceof Error) {
+        throw new ApiError({
+          status: 500,
+          message: `Failed to create product: ${error.message}`
+        });
+      }
+      throw new ApiError({
+        status: 500,
+        message: 'An unknown error occurred'
+      });
     }
   }
 
@@ -322,12 +365,12 @@ export class CoffeeServiceClient {
         headers: this.getHeaders(),
         signal: AbortSignal.timeout(this.timeout),
       });
-      
+
       // For DELETE operations, often there's no response body
       if (response.status === 204) {
         return;
       }
-      
+
       return this.handleResponse<void>(response);
     } catch (error) {
       if (error instanceof Error) {

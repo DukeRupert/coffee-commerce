@@ -31,14 +31,6 @@ func NewProductRepository(db *DB, logger *zerolog.Logger) *productRepository {
 
 // Create adds a new product to the database
 func (r *productRepository) Create(ctx context.Context, product *model.Product) error {
-	if product.ID == uuid.Nil {
-		product.ID = uuid.New()
-	}
-
-	now := time.Now()
-	product.CreatedAt = now
-	product.UpdatedAt = now
-
 	// Convert Options map to JSON string for storage
 	optionsJSON, err := json.Marshal(product.Options)
 	if err != nil {
@@ -135,6 +127,60 @@ func (r *productRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 	}
 
 	return &product, nil
+}
+
+// GetProductByName retrieves a product by its name
+func (r *productRepository) GetByName(ctx context.Context, name string) (*model.Product, error) {
+    query := `
+        SELECT id, stripe_id, name, description, image_url, origin, roast_level,
+               stock_level, flavor_notes, active, options, allow_subscription,
+               created_at, updated_at
+        FROM products
+        WHERE name = $1
+        LIMIT 1
+    `
+
+    r.logger.Debug().Str("name", name).Msg("Querying product by name")
+
+    var product model.Product
+    var optionsJSON []byte // for storing the JSONB data
+
+    err := r.db.QueryRowContext(ctx, query, name).Scan(
+        &product.ID,
+        &product.StripeID,
+        &product.Name,
+        &product.Description,
+        &product.ImageURL,
+        &product.Origin,
+        &product.RoastLevel,
+        &product.StockLevel,
+        &product.FlavorNotes,
+        &product.Active,
+        &optionsJSON, // JSONB data needs special handling
+        &product.AllowSubscription,
+        &product.CreatedAt,
+        &product.UpdatedAt,
+    )
+
+    if err != nil {
+        if err == sql.ErrNoRows {
+            r.logger.Debug().Str("name", name).Msg("No product found with this name")
+            return nil, nil // Return nil, nil to indicate no product found
+        }
+        r.logger.Error().Err(err).Str("name", name).Msg("Error querying product by name")
+        return nil, fmt.Errorf("error querying product by name: %w", err)
+    }
+
+    // Parse the JSONB options data into the Options map
+    if optionsJSON != nil && len(optionsJSON) > 0 {
+        err = json.Unmarshal(optionsJSON, &product.Options)
+        if err != nil {
+            r.logger.Error().Err(err).Msg("Failed to unmarshal product options")
+            return nil, fmt.Errorf("failed to unmarshal product options: %w", err)
+        }
+    }
+
+    return &product, nil
 }
 
 // GetByStripeID retrieves a product by its Stripe ID

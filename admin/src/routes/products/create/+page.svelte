@@ -1,7 +1,10 @@
 <script lang="ts">
-  import type { PageData } from "./$types";
+  import type { PageProps } from './$types'
+  import { enhance } from '$app/forms';
   import { X } from '@lucide/svelte';
-  let { data }: { data: PageData } = $props();
+	import { goto } from '$app/navigation';
+  let { form }: PageProps = $props();
+  $inspect(form)
 
   // Define the product interface to match the API schema
   interface CreateProductRequest {
@@ -20,26 +23,30 @@
     };
   }
 
-  // State for form values
+  // State for form values - initialize with form data if available
   let product = $state<CreateProductRequest>({
-    name: '',
-    description: '',
-    image_url: '',
-    origin: '',
-    roast_level: 'Medium',
-    flavor_notes: '',
-    stock_level: 0,
-    active: true,
-    allow_subscription: false,
+    name: form?.values?.name.toString() || '',
+    description: form?.values?.description.toString() || '',
+    image_url: form?.values?.image_url.toString() || '',
+    origin: form?.values?.origin.toString() || '',
+    roast_level: form?.values?.roast_level.toString() || 'Medium',
+    flavor_notes: form?.values?.flavor_notes.toString() || '',
+    stock_level: form?.values?.stock_level ? parseInt(form.values.stock_level.toString()) : 0,
+    active: form?.values?.active === 'on' || true,
+    allow_subscription: form?.values?.allow_subscription === 'on' || false,
     options: {
       weights: [],
       grinds: []
     }
   });
+  $inspect(product)
 
   // State for form options
   let weightInput = $state('');
   let grindInput = $state('');
+  let error = $state('');
+  let isSubmitting = $state(false)
+  let validationErrors = $state({})
   
   // Predefined options
   const roastLevels = ['Light', 'Medium', 'Medium-Dark', 'Dark'];
@@ -76,33 +83,80 @@
     }
   }
   
-  // Handle form submission
-  function handleSubmit(event: SubmitEvent ) {
-    // Clone the product object to avoid any reactivity issues
-    const productData = JSON.parse(JSON.stringify(product));
-    
-    // If weights or grinds are empty arrays, remove them
-    if (productData.options?.weights?.length === 0) {
-      delete productData.options.weights;
-    }
-    if (productData.options?.grinds?.length === 0) {
-      delete productData.options.grinds;
-    }
-    // If options object is empty, remove it
-    if (Object.keys(productData.options || {}).length === 0) {
-      delete productData.options;
-    }
-    
-    // Submit the data (implement actual API call)
-    console.log('Submitting product data:', productData);
-    // Here you would typically call your API endpoint
-    // For example: fetch('/api/products', { method: 'POST', body: JSON.stringify(productData) })
-  }
-  
   // Handle cancel button
   function handleCancel() {
     // Reset form or navigate away
     console.log('Form canceled');
+  }
+
+  // Submit the form
+  async function submitProduct() {
+    try {
+      isSubmitting = true;
+      error = '';
+      validationErrors = {};
+      
+      // Clean up the product object - remove empty arrays
+      const productToSubmit = { ...product };
+      if (productToSubmit.options.weight.length === 0) {
+        delete productToSubmit.options.weight;
+      }
+      if (productToSubmit.options.grind.length === 0) {
+        delete productToSubmit.options.grind;
+      }
+      if (Object.keys(productToSubmit.options).length === 0) {
+        delete productToSubmit.options;
+      }
+      
+      // Send to your API endpoint
+      const response = await fetch('/api/products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(productToSubmit)
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        // Handle validation errors
+        if (response.status === 400 && data.validationErrors) {
+          validationErrors = data.validationErrors;
+          error = data.message || 'Validation failed';
+          return;
+        }
+        
+        // Handle other errors
+        throw new Error(data.message || 'Failed to create product');
+      }
+      
+      // Success! Redirect to product page or list
+      goto('/products');
+      
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'An unknown error occurred';
+    } finally {
+      isSubmitting = false;
+    }
+  }
+  
+  // Helper for validation errors
+  function hasError(field: string): boolean {
+    return Object.keys(validationErrors).some(key => 
+      key === field || key.startsWith(`${field}.`));
+  }
+  
+  function getError(field: string): string {
+    const directError = validationErrors[field];
+    if (directError) return directError;
+    
+    // Look for nested errors
+    const nestedErrors = Object.entries(validationErrors)
+      .filter(([key]) => key.startsWith(`${field}.`))
+      .map(([_, value]) => value);
+    
+    return nestedErrors.join(' ');
   }
 </script>
 <div class="md:flex md:items-center md:justify-between">
@@ -113,8 +167,13 @@
     <a href="/products" class="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-xs ring-1 ring-gray-300 ring-inset hover:bg-gray-50"><X size={16}/><span class="ml-3">Cancel</span></a>
   </div>
 </div>
-<form onsubmit={handleSubmit}>
+<form method="POST" onsubmit={submitProduct}>
   <div class="space-y-12">
+    {#if error}
+    <div class="bg-red-50 p-4 rounded-md border border-red-300">
+      <p class="text-sm text-red-700">{error}</p>
+    </div>
+  {/if}
     <div class="border-b border-gray-900/10 pb-12">
       <h2 class="text-base/7 font-semibold text-gray-900">Coffee Product Information</h2>
       <p class="mt-1 text-sm/6 text-gray-600">Provide details about the coffee product you want to add to your inventory.</p>
