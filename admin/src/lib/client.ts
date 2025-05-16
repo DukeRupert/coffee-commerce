@@ -1,4 +1,4 @@
-import { createCoffeeServiceClient, type CoffeeServiceClient } from './coffeServiceClient/client';
+import { createCoffeeServiceClient, type CoffeeServiceClient } from './coffeServiceClient/main';
 import { PUBLIC_API_URL, PUBLIC_API_VERSION, PUBLIC_API_TIMEOUT } from '$env/static/public';
 /**
  * Parse and validate a timeout value from environment variables
