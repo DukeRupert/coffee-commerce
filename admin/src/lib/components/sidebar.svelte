@@ -50,13 +50,14 @@
 		// User menu close logic
 		const userMenuButton: HTMLElement | null = document.getElementById('user-menu-button');
 		const userMenu: HTMLElement | null = document.getElementById('user-menu');
+		const target = event.target as Node;
 
 		if (
 			isUserMenuOpen &&
 			userMenu &&
 			userMenuButton &&
-			!userMenu.contains(event.target) &&
-			!userMenuButton.contains(event.target)
+			!userMenu.contains(target) &&
+			!userMenuButton.contains(target)
 		) {
 			isUserMenuOpen = false;
 		}
@@ -89,7 +90,7 @@
 	<li>
 		<a
 			href={link.href}
-			class="group flex gap-x-3 rounded-md bg-gray-800 p-2 capitalize text-sm/6 font-semibold text-white"
+			class="group flex gap-x-3 rounded-md bg-gray-800 p-2 text-sm/6 font-semibold capitalize text-white"
 		>
 			<link.icon></link.icon>
 			{link.label}
@@ -158,8 +159,8 @@
 							<li>
 								<ul role="list" class="-mx-2 space-y-1">
 									{#each links as link}
-                                      {@render MobileLink(link)}
-                                    {/each}
+										{@render MobileLink(link)}
+									{/each}
 								</ul>
 							</li>
 							<li class="mt-auto">
