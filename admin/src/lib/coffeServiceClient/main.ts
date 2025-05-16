@@ -194,6 +194,7 @@ export class CoffeeServiceClient {
    */
   private createUrl(endpoint: string, params?: Record<string, any>): string {
     const url = new URL(`${this.getBaseUrl()}${endpoint}`);
+    console.log(`Created url: ${url}`)
 
     if (params) {
       Object.entries(params).forEach(([key, value]) => {

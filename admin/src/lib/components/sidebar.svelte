@@ -20,7 +20,7 @@
 			icon: Home
 		},
 		{
-			href: 'products/',
+			href: '/products',
 			label: 'products',
 			icon: Coffee
 		}
