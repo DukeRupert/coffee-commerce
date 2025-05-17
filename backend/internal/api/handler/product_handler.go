@@ -64,6 +64,11 @@ func (h *productHandler) Create(c echo.Context) error {
 		})
 	}
 
+	// Set default weight
+	if productDTO.Weight < 1 {
+		productDTO.Weight = 1
+	}
+
 	// Validate using the existing Valid method
 	validationErrors := productDTO.Valid(c.Request().Context())
 	if len(validationErrors) > 0 {
