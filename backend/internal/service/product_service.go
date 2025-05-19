@@ -8,23 +8,12 @@ import (
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
+	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	events "github.com/dukerupert/coffee-commerce/internal/event"
-	interfaces "github.com/dukerupert/coffee-commerce/internal/repository/interface"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
-
-// ProductService defines the interface for product-related operations
-type ProductService interface {
-	// Create(ctx context.Context, productDTO *dto.ProductCreateDTO) (*models.Product, error)
-	Create(ctx context.Context, product *dto.ProductCreateDTO) (*model.Product, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*model.Product, error)
-	List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error)
-	// Update(ctx context.Context, id uuid.UUID, productDTO *dto.ProductUpdateDTO) (*models.Product, error)
-	Delete(ctx context.Context, id uuid.UUID) error
-	// UpdateStockLevel(ctx context.Context, id uuid.UUID, quantity int) error
-}
 
 // productService implements ProductService
 type productService struct {
@@ -34,7 +23,7 @@ type productService struct {
 }
 
 // NewProductService creates a new product service
-func NewProductService(logger *zerolog.Logger, eventBus events.EventBus, productRepo interfaces.ProductRepository) ProductService {
+func NewProductService(logger *zerolog.Logger, eventBus events.EventBus, productRepo interfaces.ProductRepository) interfaces.ProductService {
 	subLogger := logger.With().Str("component", "product_service").Logger()
 	return &productService{
 		logger:   subLogger,
@@ -109,15 +98,16 @@ func (s *productService) Create(ctx context.Context, p *dto.ProductCreateDTO) (*
 	return product, nil
 }
 
-func (s *productService) List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error) {
+func (s *productService) List(ctx context.Context, offset, limit int, includeInactive, includeArchived bool) ([]*model.Product, int, error) {
 	s.logger.Debug().
 		Str("function", "productService.List").
 		Int("offset", offset).
 		Int("limit", limit).
 		Bool("includeInactive", includeInactive).
+		Bool("includeArchived", includeArchived).
 		Msg("Starting product listing")
 
-	products, total, err := s.repo.List(ctx, offset, limit, includeInactive)
+	products, total, err := s.repo.List(ctx, offset, limit, includeInactive, includeArchived)
 	if err != nil {
 		s.logger.Error().
 			Str("function", "productService.List").
@@ -125,6 +115,7 @@ func (s *productService) List(ctx context.Context, offset, limit int, includeIna
 			Int("offset", offset).
 			Int("limit", limit).
 			Bool("includeInactive", includeInactive).
+			Bool("includeArchived", includeArchived).
 			Msg("Failed to retrieve products from repository")
 		return nil, 0, fmt.Errorf("failed to list products: %w", err)
 	}
@@ -136,6 +127,7 @@ func (s *productService) List(ctx context.Context, offset, limit int, includeIna
 		Int("offset", offset).
 		Int("limit", limit).
 		Bool("includeInactive", includeInactive).
+		Bool("includeArchived", includeArchived).
 		Msg("Product listing completed successfully")
 
 	return products, total, nil
@@ -167,11 +159,73 @@ func (s *productService) GetByID(ctx context.Context, id uuid.UUID) (*model.Prod
 	return product, nil
 }
 
-// Delete removes a product from the database
-func (s *productService) Delete(ctx context.Context, id uuid.UUID) error {
+// Archive soft deletes a product by marking it as archived
+func (s *productService) Archive(ctx context.Context, id uuid.UUID) error {
 	s.logger.Info().
 		Str("product_id", id.String()).
-		Msg("Deleting product")
+		Msg("Archiving product")
+
+	// First, check if the product exists
+	product, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Error retrieving product for archiving")
+		return fmt.Errorf("error retrieving product: %w", err)
+	}
+
+	if product == nil {
+		s.logger.Warn().
+			Str("product_id", id.String()).
+			Msg("Product not found for archiving")
+		return postgres.ErrResourceNotFound
+	}
+
+	// Check if product is already archived
+	if product.Archived {
+		s.logger.Info().
+			Str("product_id", id.String()).
+			Msg("Product is already archived")
+		return nil // Already archived, nothing to do
+	}
+
+	// Archive the product
+	err = s.repo.Archive(ctx, id)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to archive product")
+		return fmt.Errorf("failed to archive product: %w", err)
+	}
+
+	// Publish product archived event
+	payload := map[string]interface{}{
+		"product_id":  id.String(),
+		"product_name": product.Name,
+		"archived_at": time.Now().Format(time.RFC3339),
+	}
+
+	err = s.eventBus.Publish(events.TopicProductUpdated, payload)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to publish product archived event")
+		// Don't return the error since the product is already archived in DB
+	}
+
+	s.logger.Info().
+		Str("product_id", id.String()).
+		Msg("Product archived successfully")
+
+	return nil
+}
+
+// Delete is now a dangerous operation that should only be used in specific cases
+// such as removing test data. It attempts to hard delete a product from the database
+func (s *productService) Delete(ctx context.Context, id uuid.UUID) error {
+	s.logger.Warn().
+		Str("product_id", id.String()).
+		Msg("Attempting hard delete of product - this should only be used for testing")
 
 	// First, check if the product exists
 	product, err := s.repo.GetByID(ctx, id)

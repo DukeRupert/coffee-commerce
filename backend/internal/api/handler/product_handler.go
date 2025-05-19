@@ -2,12 +2,13 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
-	interfaces "github.com/dukerupert/coffee-commerce/internal/repository/interface"
+	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/dukerupert/coffee-commerce/internal/service"
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ type ProductHandler interface {
 	Get(c echo.Context) error
 	List(c echo.Context) error
 	Update(c echo.Context) error
+	Archive(c echo.Context) error
 	Delete(c echo.Context) error
 	UpdateStockLevel(c echo.Context) error
 }
@@ -28,13 +30,13 @@ type ProductHandler interface {
 // ProductHandler handles HTTP requests for products
 type productHandler struct {
 	logger         zerolog.Logger
-	productService service.ProductService
+	productService interfaces.ProductService
 	variantRepo    interfaces.VariantRepository
 	priceRepo      interfaces.PriceRepository
 }
 
 // NewProductHandler creates a new product handler
-func NewProductHandler(logger *zerolog.Logger, productService service.ProductService, variantRepo interfaces.VariantRepository, priceRepo interfaces.PriceRepository) *productHandler {
+func NewProductHandler(logger *zerolog.Logger, productService interfaces.ProductService, variantRepo interfaces.VariantRepository, priceRepo interfaces.PriceRepository) *productHandler {
 	sublogger := logger.With().Str("component", "product_handler").Logger()
 	return &productHandler{
 		logger:         sublogger,
@@ -283,9 +285,20 @@ func (h *productHandler) List(c echo.Context) error {
 			Bool("include_inactive", includeInactive).
 			Msg("Including inactive products in results")
 	}
+	
+	includeArchived := false
+	if c.QueryParam("include_archived") == "true" {
+		// todo: Only admins to see archived products
+		includeArchived = true
+		h.logger.Debug().
+			Str("handler", "ProductHandler.List").
+			Str("request_id", requestID).
+			Bool("include_archived", includeArchived).
+			Msg("Including archived products in results")
+	}
 
 	// 2. Call productService.List
-	products, total, err := h.productService.List(ctx, params.Offset, params.PerPage, includeInactive)
+	products, total, err := h.productService.List(ctx, params.Offset, params.PerPage, includeInactive, includeArchived)
 	if err != nil {
 		h.logger.Error().
 			Str("handler", "ProductHandler.List").
@@ -294,6 +307,7 @@ func (h *productHandler) List(c echo.Context) error {
 			Int("offset", params.Offset).
 			Int("per_page", params.PerPage).
 			Bool("include_inactive", includeInactive).
+			Bool("include_archived", includeArchived).
 			Msg("Failed to retrieve products from service")
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve products")
 	}
@@ -321,11 +335,95 @@ func (h *productHandler) Update(c echo.Context) error {
 	return c.String(http.StatusOK, "Hello, World!")
 }
 
-// Delete handles DELETE /api/products/:id
-func (h *productHandler) Delete(c echo.Context) error {
+// Archive handles POST /api/products/:id/archive
+func (h *productHandler) Archive(c echo.Context) error {
 	ctx := c.Request().Context()
 	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
 
+	// 1. Parse ID from URL
+	idParam := c.Param("id")
+
+	h.logger.Info().
+		Str("handler", "ProductHandler.Archive").
+		Str("request_id", requestID).
+		Str("method", c.Request().Method).
+		Str("path", c.Request().URL.Path).
+		Str("remote_addr", c.Request().RemoteAddr).
+		Str("id_param", idParam).
+		Msg("Handling product archive by ID request")
+
+	// Convert string ID to UUID
+	productID, err := uuid.Parse(idParam)
+	if err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("request_id", requestID).
+			Str("id_param", idParam).
+			Msg("Invalid product ID format")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  http.StatusBadRequest,
+			Message: "Invalid product ID format",
+			Code:    "INVALID_ID_FORMAT",
+		})
+	}
+
+	// 2. Call service to archive the product
+	err = h.productService.Archive(ctx, productID)
+	if err != nil {
+		h.logger.Error().
+			Err(err).
+			Str("request_id", requestID).
+			Str("product_id", productID.String()).
+			Msg("Failed to archive product")
+
+		// Handle specific error types
+		switch {
+		case errors.Is(err, postgres.ErrResourceNotFound):
+			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+				Status:  http.StatusNotFound,
+				Message: "Product not found",
+				Code:    "PRODUCT_NOT_FOUND",
+			})
+
+		case errors.Is(err, service.ErrInsufficientPermissions):
+			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+				Status:  http.StatusForbidden,
+				Message: "You don't have permission to archive this product",
+				Code:    "FORBIDDEN",
+			})
+
+		default:
+			// Generic server error
+			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  http.StatusInternalServerError,
+				Message: "Failed to archive product",
+				Code:    "INTERNAL_ERROR",
+			})
+		}
+	}
+
+	// 3. Return success response
+	h.logger.Info().
+		Str("request_id", requestID).
+		Str("product_id", productID.String()).
+		Msg("Product archived successfully")
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Product archived successfully",
+	})
+}
+
+// Delete handles DELETE /api/products/:id
+// Delete now redirects to Archive as the preferred method for removing products
+func (h *productHandler) Delete(c echo.Context) error {
+	ctx := c.Request().Context()
+	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
+	
+	// Get the "hard_delete" query parameter
+	hardDelete := c.QueryParam("hard_delete") == "true"
+	
 	// 1. Parse ID from URL
 	idParam := c.Param("id")
 
@@ -336,6 +434,7 @@ func (h *productHandler) Delete(c echo.Context) error {
 		Str("path", c.Request().URL.Path).
 		Str("remote_addr", c.Request().RemoteAddr).
 		Str("id_param", idParam).
+		Bool("hard_delete", hardDelete).
 		Msg("Handling product delete by ID request")
 
 	// Convert string ID to UUID
@@ -354,14 +453,34 @@ func (h *productHandler) Delete(c echo.Context) error {
 		})
 	}
 
-	// 2. Call service to delete the product
-	err = h.productService.Delete(ctx, productID)
+	// If not a hard delete request, redirect to Archive method
+	if !hardDelete {
+		h.logger.Info().
+			Str("request_id", requestID).
+			Str("product_id", productID.String()).
+			Msg("Redirecting delete request to archive operation")
+			
+		err = h.productService.Archive(ctx, productID)
+	} else {
+		// This is a hard delete request - only allow for admin users
+		// TODO: Add proper permission checking here
+		h.logger.Warn().
+			Str("request_id", requestID).
+			Str("product_id", productID.String()).
+			Msg("Attempting hard delete operation - this should only be used for testing")
+			
+		// Attempt the hard delete
+		err = h.productService.Delete(ctx, productID)
+	}
+	
+	// Error handling - same for both archive and delete
 	if err != nil {
 		h.logger.Error().
 			Err(err).
 			Str("request_id", requestID).
 			Str("product_id", productID.String()).
-			Msg("Failed to delete product")
+			Bool("hard_delete", hardDelete).
+			Msg("Failed to remove product")
 
 		// Handle specific error types
 		switch {
@@ -378,26 +497,50 @@ func (h *productHandler) Delete(c echo.Context) error {
 				Message: "You don't have permission to delete this product",
 				Code:    "FORBIDDEN",
 			})
+			
+		case errors.Is(err, postgres.ErrDatabaseConnection):
+			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+				Status:  http.StatusServiceUnavailable,
+				Message: "Service temporarily unavailable, please try again later",
+				Code:    "SERVICE_UNAVAILABLE",
+			})
 
 		default:
+			// If it's a foreign key constraint error (common with hard delete), 
+			// suggest using archive instead
+			if hardDelete {
+				return c.JSON(http.StatusConflict, api.ErrorResponse{
+					Status:  http.StatusConflict,
+					Message: "This product cannot be hard deleted because it has associated records. Use archive instead.",
+					Code:    "FOREIGN_KEY_CONSTRAINT",
+				})
+			}
+			
 			// Generic server error
 			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
 				Status:  http.StatusInternalServerError,
-				Message: "Failed to delete product",
+				Message: "Failed to remove product",
 				Code:    "INTERNAL_ERROR",
 			})
 		}
 	}
 
 	// 3. Return success response
+	operation := "archived"
+	if hardDelete {
+		operation = "deleted"
+	}
+	
 	h.logger.Info().
 		Str("request_id", requestID).
 		Str("product_id", productID.String()).
-		Msg("Product deleted successfully")
+		Bool("hard_delete", hardDelete).
+		Str("operation", operation).
+		Msg("Product successfully removed")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
-		"message": "Product deleted successfully",
+		"message": fmt.Sprintf("Product successfully %s", operation),
 	})
 }
 

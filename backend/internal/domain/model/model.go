@@ -8,18 +8,19 @@ import (
 
 type Product struct {
 	ID                uuid.UUID           `json:"id"`
+	StripeID          string              `json:"stripe_id"`
 	Name              string              `json:"name"`
 	Description       string              `json:"description"`
 	ImageURL          string              `json:"image_url"`
-	Active            bool                `json:"active"`
-	StockLevel        int                 `json:"stock_level"`
-	Weight            int                 `json:"weight"` // Base weight in grams
 	Origin            string              `json:"origin"`
 	RoastLevel        string              `json:"roast_level"`
 	FlavorNotes       string              `json:"flavor_notes"`
-	Options           map[string][]string `json:"options"`            // Product options (e.g., weight, grind)
+	Active            bool                `json:"active"`
+	Archived          bool                `json:"archived"`
 	AllowSubscription bool                `json:"allow_subscription"` // Flag to indicate if product can be subscribed to
-	StripeID          string              `json:"stripe_id"`
+	StockLevel        int                 `json:"stock_level"`
+	Weight            int                 `json:"weight"`  // Base weight in grams
+	Options           map[string][]string `json:"options"` // Product options (e.g., weight, grind)
 	CreatedAt         time.Time           `json:"created_at"`
 	UpdatedAt         time.Time           `json:"updated_at"`
 }
@@ -30,10 +31,10 @@ type Variant struct {
 	ProductID     uuid.UUID         `json:"product_id"`
 	PriceID       uuid.UUID         `json:"price_id"`
 	StripePriceID string            `json:"stripe_price_id"`
-	Weight        int               `json:"weight"`  // Base weight in grams
-	Options       map[string]string `json:"options"` // Map of option key to selected value
 	Active        bool              `json:"active"`
 	StockLevel    int               `json:"stock_level"`
+	Weight        int               `json:"weight"`  // Base weight in grams
+	Options       map[string]string `json:"options"` // Map of option key to selected value
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
 }

@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/dukerupert/coffee-commerce/internal/api"
-	interfaces "github.com/dukerupert/coffee-commerce/internal/repository/interface"
+	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog"

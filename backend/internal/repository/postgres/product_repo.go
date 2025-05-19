@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
+	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -22,7 +23,7 @@ type productRepository struct {
 }
 
 // NewProductRepository creates a new ProductRepository
-func NewProductRepository(db *DB, logger *zerolog.Logger) *productRepository {
+func NewProductRepository(db *DB, logger *zerolog.Logger) interfaces.ProductRepository {
 	return &productRepository{
 		db:     db,
 		logger: logger.With().Str("component", "product_repository").Logger(),
@@ -39,13 +40,13 @@ func (r *productRepository) Create(ctx context.Context, product *model.Product) 
 
 	query := `
 		INSERT INTO products (
-			id, name, description, image_url, active, stock_level,
+			id, name, description, image_url, active, archived, stock_level,
 			weight, origin, roast_level, flavor_notes, options, allow_subscription, stripe_id,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12, $13,
-			$14, $15
+			$14, $15, $16
 		)
 	`
 
@@ -58,6 +59,7 @@ func (r *productRepository) Create(ctx context.Context, product *model.Product) 
 		product.Description,
 		product.ImageURL,
 		product.Active,
+		product.Archived,
 		product.StockLevel,
 		product.Weight,
 		product.Origin,
@@ -81,7 +83,7 @@ func (r *productRepository) Create(ctx context.Context, product *model.Product) 
 func (r *productRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Product, error) {
 	query := `
 		SELECT 
-			id, name, description, image_url, active, stock_level,
+			id, name, description, image_url, active, archived, stock_level,
 			weight, origin, roast_level, flavor_notes, options, allow_subscription, stripe_id,
 			created_at, updated_at
 		FROM products
@@ -97,6 +99,7 @@ func (r *productRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 		&product.Description,
 		&product.ImageURL,
 		&product.Active,
+		&product.Archived,
 		&product.StockLevel,
 		&product.Weight,
 		&product.Origin,
@@ -133,7 +136,7 @@ func (r *productRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 func (r *productRepository) GetByName(ctx context.Context, name string) (*model.Product, error) {
     query := `
         SELECT id, stripe_id, name, description, image_url, origin, roast_level,
-               stock_level, flavor_notes, active, options, allow_subscription,
+               stock_level, flavor_notes, active, archived, options, allow_subscription,
                created_at, updated_at
         FROM products
         WHERE name = $1
@@ -156,6 +159,7 @@ func (r *productRepository) GetByName(ctx context.Context, name string) (*model.
         &product.StockLevel,
         &product.FlavorNotes,
         &product.Active,
+		&product.Archived,
         &optionsJSON, // JSONB data needs special handling
         &product.AllowSubscription,
         &product.CreatedAt,
@@ -172,7 +176,7 @@ func (r *productRepository) GetByName(ctx context.Context, name string) (*model.
     }
 
     // Parse the JSONB options data into the Options map
-    if optionsJSON != nil && len(optionsJSON) > 0 {
+    if len(optionsJSON) > 0 {
         err = json.Unmarshal(optionsJSON, &product.Options)
         if err != nil {
             r.logger.Error().Err(err).Msg("Failed to unmarshal product options")
@@ -187,7 +191,7 @@ func (r *productRepository) GetByName(ctx context.Context, name string) (*model.
 func (r *productRepository) GetByStripeID(ctx context.Context, stripeID string) (*model.Product, error) {
 	query := `
 		SELECT 
-			id, name, description, image_url, active, stock_level,
+			id, name, description, image_url, active, archived, stock_level,
 			weight, origin, roast_level, flavor_notes, options, allow_subscription, stripe_id,
 			created_at, updated_at
 		FROM products
@@ -203,6 +207,7 @@ func (r *productRepository) GetByStripeID(ctx context.Context, stripeID string) 
 		&product.Description,
 		&product.ImageURL,
 		&product.Active,
+		&product.Archived,
 		&product.StockLevel,
 		&product.Weight,
 		&product.Origin,
@@ -235,18 +240,32 @@ func (r *productRepository) GetByStripeID(ctx context.Context, stripeID string) 
 }
 
 // List retrieves all products, with optional filtering
-func (r *productRepository) List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error) {
+func (r *productRepository) List(ctx context.Context, offset, limit int, includeInactive, includeArchived bool) ([]*model.Product, int, error) {
 	r.logger.Info().Msg("Executing List()")
 
-	whereClause := ""
+	// Build the WHERE clause based on filter parameters
+	whereConditions := []string{}
+	
 	if !includeInactive {
-		whereClause = "WHERE active = true"
+		whereConditions = append(whereConditions, "active = true")
+	}
+	
+	if !includeArchived {
+		whereConditions = append(whereConditions, "archived = false")
+	}
+	
+	whereClause := ""
+	if len(whereConditions) > 0 {
+		whereClause = "WHERE " + whereConditions[0]
+		for i := 1; i < len(whereConditions); i++ {
+			whereClause += " AND " + whereConditions[i]
+		}
 	}
 
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM products %s", whereClause)
 	listQuery := fmt.Sprintf(`
 		SELECT 
-			id, name, description, image_url, active, stock_level,
+			id, name, description, image_url, active, archived, stock_level,
 			weight, origin, roast_level, flavor_notes, options, allow_subscription, stripe_id,
 			created_at, updated_at
 		FROM products
@@ -288,6 +307,7 @@ func (r *productRepository) List(ctx context.Context, offset, limit int, include
 			&product.Description,
 			&product.ImageURL,
 			&product.Active,
+			&product.Archived,
 			&product.StockLevel,
 			&product.Weight,
 			&product.Origin,
@@ -338,16 +358,17 @@ func (r *productRepository) Update(ctx context.Context, product *model.Product) 
 			description = $2,
 			image_url = $3,
 			active = $4,
-			stock_level = $5,
-			weight = $6,
-			origin = $7,
-			roast_level = $8,
-			flavor_notes = $9,
-			options = $10,
-			allow_subscription = $11,
-			stripe_id = $12,
-			updated_at = $13
-		WHERE id = $14
+			archived = $5,
+			stock_level = $6,
+			weight = $7,
+			origin = $8,
+			roast_level = $9,
+			flavor_notes = $10,
+			options = $11,
+			allow_subscription = $12,
+			stripe_id = $13,
+			updated_at = $14
+		WHERE id = $15
 	`
 
 	result, err := r.db.ExecContext(
@@ -357,6 +378,7 @@ func (r *productRepository) Update(ctx context.Context, product *model.Product) 
 		product.Description,
 		product.ImageURL,
 		product.Active,
+		product.Archived,
 		product.StockLevel,
 		product.Weight,
 		product.Origin,
@@ -380,6 +402,39 @@ func (r *productRepository) Update(ctx context.Context, product *model.Product) 
 
 	if rowsAffected == 0 {
 		return fmt.Errorf("product with ID %s not found", product.ID)
+	}
+
+	return nil
+}
+
+// Archive marks a product as archived (soft delete)
+func (r *productRepository) Archive(ctx context.Context, id uuid.UUID) error {
+	query := `
+		UPDATE products SET
+			archived = true,
+			active = false,
+			updated_at = $1
+		WHERE id = $2
+	`
+
+	result, err := r.db.ExecContext(
+		ctx,
+		query,
+		time.Now(),
+		id,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to archive product: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("product with ID %s not found", id)
 	}
 
 	return nil

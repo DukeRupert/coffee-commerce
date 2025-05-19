@@ -31,7 +31,7 @@ func init() {
 
 func main() {
 	// Initialize logger
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
+	logger  := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: zerolog.TimeFormatUnix}).With().Timestamp().Logger()
 
 	debug := flag.Bool("debug", false, "sets log level to debug")
 	metricsAddr := flag.String("metrics-addr", ":9090", "The address the metrics server binds to")

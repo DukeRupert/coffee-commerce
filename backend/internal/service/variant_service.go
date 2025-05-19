@@ -10,7 +10,7 @@ import (
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	events "github.com/dukerupert/coffee-commerce/internal/event"
-	interfaces "github.com/dukerupert/coffee-commerce/internal/repository/interface"
+	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )

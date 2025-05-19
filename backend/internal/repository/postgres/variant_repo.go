@@ -28,8 +28,6 @@ func NewVariantRepository(db *DB, logger *zerolog.Logger) *variantRepository {
 	}
 }
 
-// internal/repository/postgres/variant_repo.go
-
 // Create adds a new variant to the database
 func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) error {
 	// Convert Options map to JSON string for storage
