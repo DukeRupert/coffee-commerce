@@ -30,12 +30,15 @@ type variantService struct {
 }
 
 // NewVariantService creates a new variant service and subscribes to relevant events
-func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus) (VariantService, error) {
+func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variantRepo interfaces.VariantRepository, productRepo interfaces.ProductRepository, priceRepo interfaces.PriceRepository) (VariantService, error) {
 	subLogger := logger.With().Str("component", "variant_service").Logger()
 
 	s := &variantService{
-		logger:   subLogger,
-		eventBus: eventBus,
+		logger:      subLogger,
+		eventBus:    eventBus,
+		variantRepo: variantRepo,
+		productRepo: productRepo,
+		priceRepo:   priceRepo,
 	}
 
 	// Subscribe to product created events
@@ -531,46 +534,21 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 	// Initialize the options map for the variant
 	options := make(map[string]string)
 
-	// Extract option values
-	var weightStr, grindStr string
-
 	// Check if OptionValues is nil before accessing it
 	if payload.OptionValues != nil {
 		// Populate the options map with all options
 		for key, value := range payload.OptionValues {
 			options[key] = value
 		}
-
-		// Also set the legacy fields for backward compatibility
-		weightStr = payload.OptionValues["weights"]
-		if weightStr == "" {
-			weightStr = payload.OptionValues["weight"]
-		}
-
-		grindStr = payload.OptionValues["grinds"]
-		if grindStr == "" {
-			grindStr = payload.OptionValues["grind"]
-		}
 	}
 
-	// Use defaults if legacy fields are empty
-	if weightStr == "" {
-		weightStr = "default"
-	}
-
-	if grindStr == "" {
-		grindStr = "default"
-	}
-
-	// Create the variant
+	// Create the variant without explicit weight and grind fields
 	variant := &model.Variant{
 		ID:            uuid.New(),
 		ProductID:     productID,
 		PriceID:       priceRecord.ID,
 		StripePriceID: stripePriceID,
-		Weight:        weightStr, // Legacy field
-		Grind:         grindStr,  // Legacy field
-		Options:       options,   // New options field with all selections
+		Options:       options,
 		Active:        true,
 		StockLevel:    0, // Default to 0 until specifically set
 		CreatedAt:     time.Now(),
@@ -581,8 +559,6 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		Str("variant_id", variant.ID.String()).
 		Str("product_id", productID.String()).
 		Str("price_id", priceRecord.ID.String()).
-		Str("weight", weightStr).
-		Str("grind", grindStr).
 		Interface("options", options).
 		Msg("Creating variant record")
 

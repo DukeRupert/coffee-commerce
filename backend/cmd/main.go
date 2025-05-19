@@ -84,15 +84,15 @@ func main() {
 
 	// Initialize repositories
 	productRepo := postgres.NewProductRepository(db, &logger)
+	variantRepo := postgres.NewVariantRepository(db, &logger)
+	priceRepo := postgres.NewPriceRepository(db, &logger)
 
 	// Initialize services
 	productService := service.NewProductService(&logger, eventBus, productRepo)
-
-	variantService, err := service.NewVariantService(&logger, eventBus)
+	_, err = service.NewVariantService(&logger, eventBus, variantRepo, productRepo, priceRepo)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize variant service")
 	}
-	_ = variantService // Using this to avoid unused variable warning
 
 	// Initialize handlers
 	productHandler := handler.NewProductHandler(&logger, productService)
@@ -101,7 +101,6 @@ func main() {
 	e := echo.New()
 
 	// middleware
-	e.Pre(middleware.AddTrailingSlash())
 	e.Use(middleware.RequestID())
 	e.Use(custommiddleware.RequestLogger(&logger))
 	corsConfig := custommiddleware.CORSConfig{

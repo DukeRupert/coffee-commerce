@@ -40,7 +40,7 @@ func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) 
 
 	query := `
         INSERT INTO variants (
-            id, product_id, price_id, stripe_price_id, weight, grind,
+            id, product_id, price_id, stripe_price_id, weight,
             options, active, stock_level, created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
@@ -55,7 +55,6 @@ func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) 
 		variant.PriceID,
 		variant.StripePriceID,
 		variant.Weight,
-		variant.Grind,
 		optionsJSON,
 		variant.Active,
 		variant.StockLevel,
@@ -78,7 +77,7 @@ func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) 
 func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Variant, error) {
 	query := `
         SELECT
-            id, product_id, price_id, stripe_price_id, weight, grind,
+            id, product_id, price_id, stripe_price_id, weight,
             options, active, stock_level, created_at, updated_at
         FROM variants
         WHERE id = $1
@@ -93,7 +92,6 @@ func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.V
 		&variant.PriceID,
 		&variant.StripePriceID,
 		&variant.Weight,
-		&variant.Grind,
 		&optionsJSON,
 		&variant.Active,
 		&variant.StockLevel,
@@ -125,7 +123,7 @@ func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.V
 func (r *variantRepository) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*model.Variant, error) {
 	query := `
         SELECT
-            id, product_id, price_id, stripe_price_id, weight, grind,
+            id, product_id, price_id, stripe_price_id, weight,
             options, active, stock_level, created_at, updated_at
         FROM variants
         WHERE product_id = $1
@@ -150,7 +148,6 @@ func (r *variantRepository) GetByProductID(ctx context.Context, productID uuid.U
 			&variant.PriceID,
 			&variant.StripePriceID,
 			&variant.Weight,
-			&variant.Grind,
 			&optionsJSON,
 			&variant.Active,
 			&variant.StockLevel,
@@ -197,7 +194,6 @@ func (r *variantRepository) Update(ctx context.Context, variant *model.Variant) 
             price_id = $1,
             stripe_price_id = $2,
             weight = $3,
-            grind = $4,
             options = $5,
             active = $6,
             stock_level = $7,
@@ -211,7 +207,6 @@ func (r *variantRepository) Update(ctx context.Context, variant *model.Variant) 
 		variant.PriceID,
 		variant.StripePriceID,
 		variant.Weight,
-		variant.Grind,
 		optionsJSON,
 		variant.Active,
 		variant.StockLevel,
