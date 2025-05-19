@@ -9,15 +9,11 @@ CREATE TABLE products (
     image_url TEXT,
     origin VARCHAR(255),
     roast_level VARCHAR(50),
-    -- Remove the fixed grind column since it will now be in options
-    -- grind VARCHAR(50),
     stock_level INTEGER DEFAULT 0,
     weight INTEGER DEFAULT 1,
     flavor_notes TEXT,
     active BOOLEAN DEFAULT TRUE,
-    -- Add options column to store product options as JSONB
     options JSONB DEFAULT '{}',
-    -- Add a flag for subscription capability
     allow_subscription BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP
     WITH

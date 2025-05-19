@@ -30,14 +30,25 @@ func NewPriceRepository(db *DB, logger *zerolog.Logger) *priceRepository {
 // Create adds a new price to the database
 func (r *priceRepository) Create(ctx context.Context, price *model.Price) error {
 	query := `
-		INSERT INTO prices (
-			id, product_id, name, amount, currency, type,
-			interval, interval_count, active, stripe_id,
-			created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		)
-	`
+        INSERT INTO prices (
+            id, product_id, name, amount, currency, type,
+            interval, interval_count, active, stripe_id,
+            created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+        )
+    `
+
+	// Handle NULL values for interval and interval_count
+	var interval interface{} = nil
+	if price.Type == "recurring" && price.Interval != "" {
+		interval = price.Interval
+	}
+
+	var intervalCount interface{} = nil
+	if price.Type == "recurring" && price.IntervalCount > 0 {
+		intervalCount = price.IntervalCount
+	}
 
 	_, err := r.db.ExecContext(
 		ctx,
@@ -48,8 +59,8 @@ func (r *priceRepository) Create(ctx context.Context, price *model.Price) error 
 		price.Amount,
 		price.Currency,
 		price.Type,
-		price.Interval,
-		price.IntervalCount,
+		interval,      // This will be NULL if interval is not set
+		intervalCount, // This will be NULL if interval_count is not set
 		price.Active,
 		price.StripeID,
 		price.CreatedAt,

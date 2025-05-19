@@ -513,10 +513,13 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		Amount:    price,
 		Currency:  currency,
 		Type:      "one_time", // Default to one-time price
-		Active:    true,
-		StripeID:  stripePriceID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		// For one-time prices, explicitly set interval and interval_count to empty values
+		Interval:      "", // This will be stored as NULL in the database
+		IntervalCount: 0,  // This will be stored as NULL in the database
+		Active:        true,
+		StripeID:      stripePriceID,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 
 	s.logger.Debug().
@@ -548,6 +551,7 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		ProductID:     productID,
 		PriceID:       priceRecord.ID,
 		StripePriceID: stripePriceID,
+		Weight:        1, // Default weight in grams
 		Options:       options,
 		Active:        true,
 		StockLevel:    0, // Default to 0 until specifically set

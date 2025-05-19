@@ -6,6 +6,7 @@ CREATE TABLE variants (
     stripe_price_id VARCHAR(255) NOT NULL,
     active BOOLEAN DEFAULT TRUE,
     stock_level INT DEFAULT 0,
+    weight INTEGER DEFAULT 1,
     options JSONB DEFAULT '{}',
     created_at TIMESTAMP
     WITH
