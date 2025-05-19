@@ -8,6 +8,7 @@ import (
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/dukerupert/coffee-commerce/internal/service"
+	"github.com/google/uuid"
 
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog"
@@ -216,8 +217,82 @@ func (h *productHandler) Update(c echo.Context) error {
 
 // Delete handles DELETE /api/products/:id
 func (h *productHandler) Delete(c echo.Context) error {
-	h.logger.Info().Str("handler", "ProductHandler.Delete").Msg("Handling product delete by ID request")
-	return c.String(http.StatusOK, "Hello, World!")
+	ctx := c.Request().Context()
+	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
+
+	// 1. Parse ID from URL
+	idParam := c.Param("id")
+
+	h.logger.Info().
+		Str("handler", "ProductHandler.Delete").
+		Str("request_id", requestID).
+		Str("method", c.Request().Method).
+		Str("path", c.Request().URL.Path).
+		Str("remote_addr", c.Request().RemoteAddr).
+		Str("id_param", idParam).
+		Msg("Handling product delete by ID request")
+
+	// Convert string ID to UUID
+	productID, err := uuid.Parse(idParam)
+	if err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("request_id", requestID).
+			Str("id_param", idParam).
+			Msg("Invalid product ID format")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  http.StatusBadRequest,
+			Message: "Invalid product ID format",
+			Code:    "INVALID_ID_FORMAT",
+		})
+	}
+
+	// 2. Call service to delete the product
+	err = h.productService.Delete(ctx, productID)
+	if err != nil {
+		h.logger.Error().
+			Err(err).
+			Str("request_id", requestID).
+			Str("product_id", productID.String()).
+			Msg("Failed to delete product")
+
+		// Handle specific error types
+		switch {
+		case errors.Is(err, postgres.ErrResourceNotFound):
+			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+				Status:  http.StatusNotFound,
+				Message: "Product not found",
+				Code:    "PRODUCT_NOT_FOUND",
+			})
+
+		case errors.Is(err, service.ErrInsufficientPermissions):
+			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+				Status:  http.StatusForbidden,
+				Message: "You don't have permission to delete this product",
+				Code:    "FORBIDDEN",
+			})
+
+		default:
+			// Generic server error
+			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  http.StatusInternalServerError,
+				Message: "Failed to delete product",
+				Code:    "INTERNAL_ERROR",
+			})
+		}
+	}
+
+	// 3. Return success response
+	h.logger.Info().
+		Str("request_id", requestID).
+		Str("product_id", productID.String()).
+		Msg("Product deleted successfully")
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Product deleted successfully",
+	})
 }
 
 // UpdateStockLevel handles PATCH /api/products/:id/stock

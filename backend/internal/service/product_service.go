@@ -4,11 +4,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	events "github.com/dukerupert/coffee-commerce/internal/event"
 	interfaces "github.com/dukerupert/coffee-commerce/internal/repository/interface"
+	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -19,7 +22,7 @@ type ProductService interface {
 	// GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
 	List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error)
 	// Update(ctx context.Context, id uuid.UUID, productDTO *dto.ProductUpdateDTO) (*models.Product, error)
-	// Delete(ctx context.Context, id uuid.UUID) error
+	Delete(ctx context.Context, id uuid.UUID) error
 	// UpdateStockLevel(ctx context.Context, id uuid.UUID, quantity int) error
 }
 
@@ -136,4 +139,56 @@ func (s *productService) List(ctx context.Context, offset, limit int, includeIna
 		Msg("Product listing completed successfully")
 
 	return products, total, nil
+}
+
+// Delete removes a product from the database
+func (s *productService) Delete(ctx context.Context, id uuid.UUID) error {
+	s.logger.Info().
+		Str("product_id", id.String()).
+		Msg("Deleting product")
+
+	// First, check if the product exists
+	product, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Error retrieving product for deletion")
+		return fmt.Errorf("error retrieving product: %w", err)
+	}
+
+	if product == nil {
+		s.logger.Warn().
+			Str("product_id", id.String()).
+			Msg("Product not found for deletion")
+		return postgres.ErrResourceNotFound
+	}
+
+	// Delete the product from the database
+	err = s.repo.Delete(ctx, id)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to delete product from database")
+		return fmt.Errorf("failed to delete product: %w", err)
+	}
+
+	// Publish product deleted event
+	payload := map[string]string{
+		"product_id": id.String(),
+		"deleted_at": time.Now().Format(time.RFC3339),
+	}
+
+	err = s.eventBus.Publish(events.TopicProductDeleted, payload)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to publish product deleted event")
+		// Don't return the error since the product is already deleted from DB
+	}
+
+	s.logger.Info().
+		Str("product_id", id.String()).
+		Msg("Product deleted successfully")
+
+	return nil
 }

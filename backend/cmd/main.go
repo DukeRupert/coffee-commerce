@@ -8,7 +8,7 @@ import (
 
 	"github.com/dukerupert/coffee-commerce/config"
 	"github.com/dukerupert/coffee-commerce/internal/api/handler"
-	"github.com/dukerupert/coffee-commerce/internal/event"
+	events "github.com/dukerupert/coffee-commerce/internal/event"
 	"github.com/dukerupert/coffee-commerce/internal/metrics"
 	custommiddleware "github.com/dukerupert/coffee-commerce/internal/middleware"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
@@ -75,9 +75,9 @@ func main() {
 	// Initialize event bus
 	logger.Info().Msg("Initializing event bus")
 	eventBus, err := events.NewNATSEventBus(
-		cfg.MessageBus.URL, 
-		&logger, 
-		eventMetrics, 
+		cfg.MessageBus.URL,
+		&logger,
+		eventMetrics,
 		"main-service",
 	)
 	defer eventBus.Close()
@@ -104,11 +104,11 @@ func main() {
 	e.Pre(middleware.AddTrailingSlash())
 	e.Use(middleware.RequestID())
 	e.Use(custommiddleware.RequestLogger(&logger))
-		corsConfig := custommiddleware.CORSConfig{
+	corsConfig := custommiddleware.CORSConfig{
 		AllowOrigins: []string{
 			"https://orange-goldfish-wg644q6vqxv295gg-5173.app.github.dev", // Your frontend origin
-			"http://localhost:5173",                                         // Local development
-			"*",                                                             // Allow all origins (for development)
+			"http://localhost:5173", // Local development
+			"*",                     // Allow all origins (for development)
 		},
 		AllowMethods: []string{
 			echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.PATCH, echo.OPTIONS,
@@ -121,6 +121,7 @@ func main() {
 	products := v1.Group("/products")
 	products.GET("/", productHandler.List)
 	products.POST("/", productHandler.Create)
+	products.DELETE("/:id", productHandler.Delete)
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
