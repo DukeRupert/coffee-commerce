@@ -19,7 +19,7 @@ import (
 type ProductService interface {
 	// Create(ctx context.Context, productDTO *dto.ProductCreateDTO) (*models.Product, error)
 	Create(ctx context.Context, product *dto.ProductCreateDTO) (*model.Product, error)
-	// GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Product, error)
 	List(ctx context.Context, offset, limit int, includeInactive bool) ([]*model.Product, int, error)
 	// Update(ctx context.Context, id uuid.UUID, productDTO *dto.ProductUpdateDTO) (*models.Product, error)
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -139,6 +139,32 @@ func (s *productService) List(ctx context.Context, offset, limit int, includeIna
 		Msg("Product listing completed successfully")
 
 	return products, total, nil
+}
+
+func (s *productService) GetByID(ctx context.Context, id uuid.UUID) (*model.Product, error) {
+	s.logger.Info().
+		Str("product_id", id.String()).
+		Msg("Retrieving product by ID")
+
+		// Get product from repository
+	product, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to retrieve product")
+		return nil, fmt.Errorf("failed to retrieve product: %w", err)
+	}
+
+	// Check if product exists
+	if product == nil {
+		s.logger.Warn().
+			Str("product_id", id.String()).
+			Msg("Product not found")
+		return nil, postgres.ErrResourceNotFound
+	}
+
+	return product, nil
 }
 
 // Delete removes a product from the database

@@ -3,9 +3,11 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
+	interfaces "github.com/dukerupert/coffee-commerce/internal/repository/interface"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/dukerupert/coffee-commerce/internal/service"
 	"github.com/google/uuid"
@@ -27,14 +29,18 @@ type ProductHandler interface {
 type productHandler struct {
 	logger         zerolog.Logger
 	productService service.ProductService
+	variantRepo    interfaces.VariantRepository
+	priceRepo      interfaces.PriceRepository
 }
 
 // NewProductHandler creates a new product handler
-func NewProductHandler(logger *zerolog.Logger, productService service.ProductService) *productHandler {
+func NewProductHandler(logger *zerolog.Logger, productService service.ProductService, variantRepo interfaces.VariantRepository, priceRepo interfaces.PriceRepository) *productHandler {
 	sublogger := logger.With().Str("component", "product_handler").Logger()
 	return &productHandler{
 		logger:         sublogger,
 		productService: productService,
+		variantRepo:    variantRepo,
+		priceRepo:      priceRepo,
 	}
 }
 
@@ -134,6 +140,7 @@ func (h *productHandler) Create(c echo.Context) error {
 
 // Get handles GET /api/products/:id
 func (h *productHandler) Get(c echo.Context) error {
+	ctx := c.Request().Context()
 	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
 
 	// 1. Parse ID from URL
@@ -147,7 +154,106 @@ func (h *productHandler) Get(c echo.Context) error {
 		Str("remote_addr", c.Request().RemoteAddr).
 		Str("id_param", idParam).
 		Msg("Handling get product by ID request")
-	return c.String(http.StatusOK, "Hello, World!")
+
+		// Convert string ID to UUID
+	productID, err := uuid.Parse(idParam)
+	if err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("request_id", requestID).
+			Str("id_param", idParam).
+			Msg("Invalid product ID format")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  http.StatusBadRequest,
+			Message: "Invalid product ID format",
+			Code:    "INVALID_ID_FORMAT",
+		})
+	}
+
+	// 2. Get product from database
+	product, err := h.productService.GetByID(ctx, productID)
+	if err != nil {
+		h.logger.Error().
+			Err(err).
+			Str("request_id", requestID).
+			Str("product_id", productID.String()).
+			Msg("Failed to retrieve product")
+
+		if errors.Is(err, postgres.ErrResourceNotFound) {
+			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+				Status:  http.StatusNotFound,
+				Message: "Product not found",
+				Code:    "PRODUCT_NOT_FOUND",
+			})
+		}
+
+		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			Status:  http.StatusInternalServerError,
+			Message: "Failed to retrieve product",
+			Code:    "INTERNAL_ERROR",
+		})
+	}
+
+	// 3. Convert product to DTO
+	productResponse := dto.ProductResponseDTOFromModel(product)
+
+	// 4. Get variants for this product
+	variants, err := h.variantRepo.GetByProductID(ctx, productID)
+	if err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("product_id", productID.String()).
+			Msg("Failed to retrieve variants, continuing with product only")
+		// Continue with just the product info if variant retrieval fails
+	}
+
+	// 5. Build variant responses with prices
+	variantResponses := []map[string]interface{}{}
+
+	for _, variant := range variants {
+		// Get price information for this variant
+		price, err := h.priceRepo.GetByID(ctx, variant.PriceID)
+		if err != nil {
+			h.logger.Warn().
+				Err(err).
+				Str("variant_id", variant.ID.String()).
+				Str("price_id", variant.PriceID.String()).
+				Msg("Failed to retrieve price for variant")
+			// Continue with basic variant info if price retrieval fails
+		}
+
+		variantResponse := map[string]interface{}{
+			"id":              variant.ID.String(),
+			"product_id":      variant.ProductID.String(),
+			"price_id":        variant.PriceID.String(),
+			"stripe_price_id": variant.StripePriceID,
+			"options":         variant.Options,
+			"active":          variant.Active,
+			"stock_level":     variant.StockLevel,
+			"created_at":      variant.CreatedAt.Format(time.RFC3339),
+			"updated_at":      variant.UpdatedAt.Format(time.RFC3339),
+		}
+
+		// Add price information if available
+		if price != nil {
+			variantResponse["price"] = map[string]interface{}{
+				"amount":   price.Amount,
+				"currency": price.Currency,
+				"type":     price.Type,
+			}
+		}
+
+		variantResponses = append(variantResponses, variantResponse)
+	}
+
+	// 6. Include variants in the response
+	response := map[string]interface{}{
+		"product":  productResponse,
+		"variants": variantResponses,
+	}
+
+	return c.JSON(http.StatusOK, response)
 }
 
 // List handles GET /api/products

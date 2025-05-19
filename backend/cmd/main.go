@@ -95,7 +95,8 @@ func main() {
 	}
 
 	// Initialize handlers
-	productHandler := handler.NewProductHandler(&logger, productService)
+	productHandler := handler.NewProductHandler(&logger, productService, variantRepo, priceRepo)
+	variantHandler := handler.NewVariantHandler(&logger, variantRepo, productRepo)
 
 	// Start echo server
 	e := echo.New()
@@ -120,7 +121,9 @@ func main() {
 	products := v1.Group("/products")
 	products.GET("/", productHandler.List)
 	products.POST("/", productHandler.Create)
+	products.GET("/:id", productHandler.Get)
 	products.DELETE("/:id", productHandler.Delete)
+	products.GET("/:id/variants", variantHandler.ListByProduct)
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
