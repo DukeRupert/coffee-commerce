@@ -30,12 +30,12 @@
 	}
 
 	// Format currency
-	function formatCurrency(amount: number): string {
-		return new Intl.NumberFormat('en-US', {
-			style: 'currency',
-			currency: 'USD'
-		}).format(amount / 100);
-	}
+	// function formatCurrency(amount: number): string {
+	// 	return new Intl.NumberFormat('en-US', {
+	// 		style: 'currency',
+	// 		currency: 'USD'
+	// 	}).format(amount / 100);
+	// }
 </script>
 
 <tr>

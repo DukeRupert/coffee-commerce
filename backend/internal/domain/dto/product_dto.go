@@ -3,10 +3,11 @@ package dto
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
-	
+
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	"github.com/google/uuid"
 )
@@ -50,6 +51,7 @@ type ProductCreateDTO struct {
 func (p *ProductCreateDTO) Valid(ctx context.Context) map[string]string {
 	problems := make(map[string]string)
 
+	// Validate required fields
 	if p.Name == "" {
 		problems["name"] = "name is required"
 	}
@@ -58,14 +60,12 @@ func (p *ProductCreateDTO) Valid(ctx context.Context) map[string]string {
 		problems["description"] = "description is required"
 	}
 
-	if p.Weight <= 0 {
-		problems["weight"] = "weight must be greater than 0"
-	}
-
+	// Validate numeric fields
 	if p.StockLevel < 0 {
 		problems["stock_level"] = "stock level cannot be negative"
 	}
 
+	// Validate roast level if provided
 	if p.RoastLevel != "" && !validRoastLevels[strings.ToLower(p.RoastLevel)] {
 		problems["roast_level"] = "must be one of: light, medium, dark"
 	}
@@ -78,31 +78,31 @@ func (p *ProductCreateDTO) Valid(ctx context.Context) map[string]string {
 		}
 	}
 
-	// Validate options
+	// Initialize options if nil
 	if p.Options == nil {
 		p.Options = make(map[string][]string)
 	}
-	
+
+	// Validate that each option has at least one value
 	for key, values := range p.Options {
-		if !validOptionKeys[key] {
-			problems["options."+key] = "is not a valid option key"
-		}
 		if len(values) == 0 {
 			problems["options."+key] = "must have at least one value"
 		}
 	}
 
-	// Check that weight and grind options are defined if product allows subscription
-	if p.AllowSubscription {
-		if _, hasWeight := p.Options["weight"]; !hasWeight {
-			problems["options.weight"] = "weight options are required for subscription products"
-		}
-		if _, hasGrind := p.Options["grind"]; !hasGrind {
-			problems["options.grind"] = "grind options are required for subscription products"
-		}
+	// For subscription products, ensure there is at least one option
+	if p.AllowSubscription && len(p.Options) == 0 {
+		problems["options"] = "at least one option set is required for subscription products"
 	}
 
 	return problems
+}
+
+// Add this function to generate temporary Stripe IDs for testing
+func GenerateTemporaryStripeID(prefix string) string {
+	// Create a unique string using the prefix and a UUID
+	randomID := uuid.New().String()
+	return fmt.Sprintf("%s_%s", prefix, randomID[:16]) // Take first 16 chars of UUID for cleaner IDs
 }
 
 // ToModel converts ProductCreateDTO to a Product model
@@ -111,6 +111,9 @@ func (p *ProductCreateDTO) ToModel() *model.Product {
 	if p.Options == nil {
 		p.Options = make(map[string][]string)
 	}
+
+	// Create a unique temporary Stripe ID if needed
+	stripeID := GenerateTemporaryStripeID("prod")
 
 	return &model.Product{
 		ID:                uuid.New(),
@@ -125,6 +128,7 @@ func (p *ProductCreateDTO) ToModel() *model.Product {
 		FlavorNotes:       p.FlavorNotes,
 		Options:           p.Options,
 		AllowSubscription: p.AllowSubscription,
+		StripeID:          stripeID,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 	}
@@ -294,7 +298,7 @@ func ProductResponseDTOFromModel(product *model.Product) ProductResponseDTO {
 	if options == nil {
 		options = make(map[string][]string)
 	}
-	
+
 	return ProductResponseDTO{
 		ID:                product.ID.String(),
 		Name:              product.Name,

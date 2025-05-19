@@ -12,7 +12,8 @@ const (
 
 // Product-related topics
 const (
-	TopicVariantCreated      = "variants.created"
+	TopicVariantCreated = "variants.created"
+	TopicVariantQueued  = "variants.queued" // Event when a variant needs to be created
 )
 
 // Customer-related topics
