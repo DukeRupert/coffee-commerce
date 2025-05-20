@@ -124,6 +124,7 @@ func main() {
 	products.GET("/:id", productHandler.Get)
 	products.DELETE("/:id", productHandler.Delete)
 	products.GET("/:id/variants", variantHandler.ListByProduct)
+	products.POST("/:id/archive", productHandler.Archive)
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
