@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	events "github.com/dukerupert/coffee-commerce/internal/event"
@@ -400,7 +402,7 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		Interface("option_values", payload.OptionValues).
 		Msg("Processing variant creation with Stripe integration")
 
-	// Create a Stripe product for this variant
+		// Create a Stripe product for this variant
 	stripeProduct, err := s.createStripeProduct(payload)
 	if err != nil {
 		s.logger.Error().Err(err).
@@ -410,10 +412,10 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		return
 	}
 
-	// Extract the Stripe product ID directly
+	// Extract the Stripe product ID
 	stripeProductID := stripeProduct.ID
 
-	// Create a default price for this product
+	// Create a price for this product in Stripe
 	stripePrice, err := s.createStripePrice(stripeProductID, payload)
 	if err != nil {
 		s.logger.Error().Err(err).
@@ -423,10 +425,10 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		return
 	}
 
-	// Extract the Stripe price ID directly
+	// Extract the Stripe price ID
 	stripePriceID := stripePrice.ID
 
-	// Create the variant in our database
+	// Create the variant in our database with the Stripe IDs
 	variant, err := s.createVariant(payload, stripeProductID, stripePriceID)
 	if err != nil {
 		s.logger.Error().Err(err).
@@ -441,7 +443,7 @@ func (s *variantService) handleVariantQueued(data []byte) {
 	variantCreatedPayload := events.VariantCreatedPayload{
 		VariantID:     variant.ID.String(),
 		ProductID:     payload.ProductID,
-		PriceID:       variant.PriceID.String(),  // Include the internal price ID
+		PriceID:       variant.PriceID.String(), // Include the internal price ID
 		StripeID:      stripeProductID,
 		StripePriceID: stripePriceID,
 		Weight:        getOptionValue(payload.OptionValues, "weight", ""),
@@ -466,8 +468,6 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		Str("product_id", payload.ProductID).
 		Str("stripe_product_id", stripeProductID).
 		Str("stripe_price_id", stripePriceID).
-		Int64("price_amount", stripePrice.UnitAmount).
-		Str("currency", string(stripePrice.Currency)).
 		Msg("Successfully created variant with Stripe integration")
 }
 
@@ -481,94 +481,72 @@ func getOptionValue(options map[string]string, key, defaultValue string) string 
 
 // createStripeProduct creates a new product in Stripe
 func (s *variantService) createStripeProduct(payload events.VariantQueuedPayload) (*stripeSDK.Product, error) {
-	// Prepare metadata from options
-	metadata := make(map[string]string)
-	for k, v := range payload.OptionValues {
-		metadata[k] = v
-	}
-	
-	// Add original product ID to metadata
-	metadata["original_product_id"] = payload.ProductID
-	
-	// Create images array if image URL is provided
-	var images []string
-	if payload.ImageURL != "" {
-		images = []string{payload.ImageURL}
-	}
-	
-	// Create the product in Stripe
-	product, err := s.stripeService.CreateProduct(
-		payload.ProductName,
-		payload.Description,
-		images,
-		metadata,
-	)
-	
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Stripe product: %w", err)
-	}
-	
-	return product, nil
+    // Prepare metadata from options
+    metadata := make(map[string]string)
+    for k, v := range payload.OptionValues {
+        metadata[k] = v
+    }
+    
+    // Add original product ID to metadata
+    metadata["original_product_id"] = payload.ProductID
+    
+    // Create images array if image URL is provided
+    var images []string
+    if payload.ImageURL != "" {
+        images = []string{payload.ImageURL}
+    }
+    
+    // Create the product in Stripe
+    product, err := s.stripeService.CreateProduct(
+        payload.ProductName,
+        payload.Description,
+        images,
+        metadata,
+    )
+    
+    if err != nil {
+        return nil, fmt.Errorf("failed to create Stripe product: %w", err)
+    }
+    
+    return product, nil
 }
 
 // createStripePrice creates a new price in Stripe
 func (s *variantService) createStripePrice(stripeProductID string, payload events.VariantQueuedPayload) (*stripeSDK.Price, error) {
-	// Determine if this is a recurring price
-	recurring := false
-	interval := ""
-	intervalCount := int64(0)
-	
-	// Check for subscription options in the variant's metadata
-	// If this is a coffee subscription, it would typically be monthly or bi-weekly
-	if value, exists := payload.OptionValues["subscription_interval"]; exists {
-		recurring = true
-		
-		// Parse interval from metadata - should be 'day', 'week', 'month', or 'year'
-		interval = value
-		
-		// Get interval count if available, default to 1
-		if countValue, exists := payload.OptionValues["subscription_interval_count"]; exists {
-			if count, err := strconv.ParseInt(countValue, 10, 64); err == nil {
-				intervalCount = count
-			} else {
-				intervalCount = 1
-			}
-		} else {
-			intervalCount = 1
-		}
-	}
-	
-	// Set a sane default price if none provided
-	amount := payload.DefaultPrice
-	if amount <= 0 {
-		// Default to $10.00 if no price specified
-		amount = 1000
-		s.logger.Warn().
-			Str("product_id", payload.ProductID).
-			Msg("No price specified for variant, defaulting to $10.00")
-	}
-	
-	// Set default currency if none provided
-	currency := payload.Currency
-	if currency == "" {
-		currency = "USD"
-	}
-	
-	// Create the price in Stripe
-	price, err := s.stripeService.CreatePrice(
-		stripeProductID,
-		amount,
-		currency,
-		recurring,
-		interval,
-		intervalCount,
-	)
-	
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Stripe price: %w", err)
-	}
-	
-	return price, nil
+    // Validate subscription parameters
+    recurring, interval, intervalCount := s.validateSubscriptionParams(payload.OptionValues)
+    
+    // Set a sane default price if none provided
+    amount := payload.DefaultPrice
+    if amount <= 0 {
+        // Default to $10.00 if no price specified
+        amount = 1000
+        s.logger.Warn().
+            Str("product_id", payload.ProductID).
+            Msg("No price specified for variant, defaulting to $10.00")
+    }
+    
+    // Set default currency if none provided
+    currency := payload.Currency
+    if currency == "" {
+        currency = "USD"
+    }
+    
+    // Create the price in Stripe
+    price, err := s.stripeService.CreatePrice(
+        stripeProductID,
+        amount,
+        currency,
+        recurring,
+        interval,
+        intervalCount,
+    )
+    
+    if err != nil {
+        return nil, fmt.Errorf("failed to create Stripe price: %w", err)
+    }
+    
+    return price, nil
 }
 
 // createVariant creates a new variant in our database
@@ -615,13 +593,13 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 	if value, exists := payload.OptionValues["subscription_interval"]; exists {
 		priceRecord.Type = "recurring"
 		priceRecord.Interval = value
-		
+
 		// Get interval count if available
 		if countValue, exists := payload.OptionValues["subscription_interval_count"]; exists {
 			if count, err := strconv.Atoi(countValue); err == nil {
 				priceRecord.IntervalCount = count
 			} else {
-				priceRecord.IntervalCount = 1 
+				priceRecord.IntervalCount = 1
 			}
 		} else {
 			priceRecord.IntervalCount = 1
@@ -647,7 +625,7 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 	options := make(map[string]string)
 
 	// Default weight in grams
-	weight := 1 
+	weight := 1
 
 	// Check if OptionValues is nil before accessing it
 	if payload.OptionValues != nil {
@@ -655,7 +633,7 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		for key, value := range payload.OptionValues {
 			options[key] = value
 		}
-		
+
 		// Try to parse weight from options if present
 		if weightStr, ok := options["weight"]; ok {
 			// Convert weight option (like "12oz") to grams if possible
@@ -694,29 +672,156 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 	return variant, nil
 }
 
-// convertWeightToGrams converts weight strings like "12oz" to grams
+// validateSubscriptionParams validates and normalizes subscription parameters
+func (s *variantService) validateSubscriptionParams(optionValues map[string]string) (bool, string, int64) {
+    // Check if this is a subscription variant
+    if _, hasInterval := optionValues["subscription_interval"]; !hasInterval {
+        return false, "", 0
+    }
+    
+    // This is a subscription, validate the interval
+    interval := strings.ToLower(strings.TrimSpace(optionValues["subscription_interval"]))
+    
+    // Check against valid intervals
+    validIntervals := map[string]bool{
+        "day":   true,
+        "week":  true,
+        "month": true,
+        "year":  true,
+    }
+    
+    if !validIntervals[interval] {
+        s.logger.Warn().
+            Str("invalid_interval", interval).
+            Msg("Invalid subscription interval, defaulting to month")
+        interval = "month"
+    }
+    
+    // Get the interval count
+    var intervalCount int64 = 1
+    if countStr, hasCount := optionValues["subscription_interval_count"]; hasCount {
+        if count, err := strconv.ParseInt(countStr, 10, 64); err == nil && count > 0 {
+            intervalCount = count
+        } else {
+            s.logger.Warn().
+                Str("invalid_count", countStr).
+                Msg("Invalid interval count, defaulting to 1")
+        }
+    }
+    
+    // Apply Stripe's limits on interval counts
+    maxCounts := map[string]int64{
+        "day":   365,
+        "week":  52,
+        "month": 12,
+        "year":  1,
+    }
+    
+    if maxCount, exists := maxCounts[interval]; exists && intervalCount > maxCount {
+        s.logger.Warn().
+            Str("interval", interval).
+            Int64("requested_count", intervalCount).
+            Int64("max_count", maxCount).
+            Msg("Interval count exceeds Stripe limit, capping to maximum")
+        
+        intervalCount = maxCount
+    }
+    
+    return true, interval, intervalCount
+}
+
+// convertWeightToGrams converts weight strings like "12oz" or "3lb" to grams
 func convertWeightToGrams(weightStr string) int {
-	// Common conversion factors
-	const (
-		gramsPerOz  = 28
-		gramsPerLb  = 454
-	)
-	
-	// Try to parse simple cases like "12oz" or "3lb"
-	if strings.HasSuffix(weightStr, "oz") {
-		value := strings.TrimSuffix(weightStr, "oz")
-		if oz, err := strconv.Atoi(value); err == nil {
-			return oz * gramsPerOz
-		}
-	}
-	
-	if strings.HasSuffix(weightStr, "lb") {
-		value := strings.TrimSuffix(weightStr, "lb")
-		if lb, err := strconv.Atoi(value); err == nil {
-			return lb * gramsPerLb
-		}
-	}
-	
-	// Default to 1 gram if we can't parse
-	return 1
+    // Common conversion factors
+    const (
+        gramsPerOz = 28
+        gramsPerLb = 454
+        gramsPerKg = 1000
+        gramsPerG  = 1
+    )
+    
+    // Clean up the input string - remove spaces and convert to lowercase
+    cleaned := strings.ToLower(strings.TrimSpace(weightStr))
+    
+    // Try to parse common weight formats
+    
+    // Parse ounces (e.g., "12oz", "12 oz", "12ounce", "12ounces")
+    if strings.Contains(cleaned, "oz") || strings.Contains(cleaned, "ounce") {
+        // Extract the numeric part
+        numStr := ""
+        for _, char := range cleaned {
+            if unicode.IsDigit(char) || char == '.' {
+                numStr += string(char)
+            } else {
+                break
+            }
+        }
+        
+        // Parse the numeric part
+        if oz, err := strconv.ParseFloat(numStr, 64); err == nil {
+            return int(math.Round(oz * float64(gramsPerOz)))
+        }
+    }
+    
+    // Parse pounds (e.g., "3lb", "3 lb", "3pound", "3pounds")
+    if strings.Contains(cleaned, "lb") || strings.Contains(cleaned, "pound") {
+        // Extract the numeric part
+        numStr := ""
+        for _, char := range cleaned {
+            if unicode.IsDigit(char) || char == '.' {
+                numStr += string(char)
+            } else {
+                break
+            }
+        }
+        
+        // Parse the numeric part
+        if lb, err := strconv.ParseFloat(numStr, 64); err == nil {
+            return int(math.Round(lb * float64(gramsPerLb)))
+        }
+    }
+    
+    // Parse kilograms (e.g., "1kg", "1 kg", "1kilo")
+    if strings.Contains(cleaned, "kg") || strings.Contains(cleaned, "kilo") {
+        // Extract the numeric part
+        numStr := ""
+        for _, char := range cleaned {
+            if unicode.IsDigit(char) || char == '.' {
+                numStr += string(char)
+            } else {
+                break
+            }
+        }
+        
+        // Parse the numeric part
+        if kg, err := strconv.ParseFloat(numStr, 64); err == nil {
+            return int(math.Round(kg * float64(gramsPerKg)))
+        }
+    }
+    
+    // Parse grams (e.g., "500g", "500 g", "500gram", "500grams")
+    if strings.Contains(cleaned, "g") && !strings.Contains(cleaned, "kg") {
+        // Extract the numeric part
+        numStr := ""
+        for _, char := range cleaned {
+            if unicode.IsDigit(char) || char == '.' {
+                numStr += string(char)
+            } else {
+                break
+            }
+        }
+        
+        // Parse the numeric part
+        if g, err := strconv.ParseFloat(numStr, 64); err == nil {
+            return int(math.Round(g * float64(gramsPerG)))
+        }
+    }
+    
+    // Try to parse as plain number (assuming grams)
+    if g, err := strconv.Atoi(cleaned); err == nil {
+        return g
+    }
+    
+    // Default to 1 gram if we can't parse
+    return 1
 }
