@@ -27,16 +27,17 @@ type Product struct {
 
 // Variant represents a specific product variant (combination of product options)
 type Variant struct {
-	ID            uuid.UUID         `json:"id"`
-	ProductID     uuid.UUID         `json:"product_id"`
-	PriceID       uuid.UUID         `json:"price_id"`
-	StripePriceID string            `json:"stripe_price_id"`
-	Active        bool              `json:"active"`
-	StockLevel    int               `json:"stock_level"`
-	Weight        int               `json:"weight"`  // Base weight in grams
-	Options       map[string]string `json:"options"` // Map of option key to selected value
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	ID              uuid.UUID         `json:"id"`
+	ProductID       uuid.UUID         `json:"product_id"`
+	PriceID         uuid.UUID         `json:"price_id"`
+	StripeProductID string            `json:"stripe_product_id"`
+	StripePriceID   string            `json:"stripe_price_id"`
+	Active          bool              `json:"active"`
+	StockLevel      int               `json:"stock_level"`
+	Weight          int               `json:"weight"`  // Base weight in grams
+	Options         map[string]string `json:"options"` // Map of option key to selected value
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // Price represents the pricing options for subscriptions or one-time purchases

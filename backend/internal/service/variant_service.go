@@ -375,19 +375,19 @@ func (s *variantService) handleVariantQueued(data []byte) {
 
 	// Publish an event that the variant was created
 	variantCreatedPayload := events.VariantCreatedPayload{
-		VariantID:     variant.ID.String(),
-		ProductID:     payload.ProductID,
-		PriceID:       variant.PriceID.String(), // Include the internal price ID
-		StripeID:      stripeProductID,
-		StripePriceID: stripePriceID,
-		Weight:        getOptionValue(payload.OptionValues, "weight", ""),
-		Grind:         getOptionValue(payload.OptionValues, "grind", ""),
-		OptionValues:  payload.OptionValues,
-		Amount:        stripePrice.UnitAmount,
-		Currency:      string(stripePrice.Currency),
-		Active:        variant.Active,
-		StockLevel:    variant.StockLevel,
-		CreatedAt:     time.Now(),
+		VariantID:       variant.ID.String(),
+		ProductID:       payload.ProductID,
+		PriceID:         variant.PriceID.String(), // Include the internal price ID
+		StripeProductID: stripeProductID,
+		StripePriceID:   stripePriceID,
+		Weight:          getOptionValue(payload.OptionValues, "weight", ""),
+		Grind:           getOptionValue(payload.OptionValues, "grind", ""),
+		OptionValues:    payload.OptionValues,
+		Amount:          stripePrice.UnitAmount,
+		Currency:        string(stripePrice.Currency),
+		Active:          variant.Active,
+		StockLevel:      variant.StockLevel,
+		CreatedAt:       time.Now(),
 	}
 
 	err = s.eventBus.Publish(events.TopicVariantCreated, variantCreatedPayload)
@@ -580,8 +580,8 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		ID:              uuid.New(),
 		ProductID:       productID,
 		PriceID:         priceRecord.ID,
+		StripeProductID: stripeProductID,
 		StripePriceID:   stripePriceID,
-		stripeProductID: stripeProductID,
 		Weight:          weight,
 		Options:         options,
 		Active:          true,
@@ -594,6 +594,7 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		Str("variant_id", variant.ID.String()).
 		Str("product_id", productID.String()).
 		Str("price_id", priceRecord.ID.String()).
+		Str("stripe_product_id", variant.StripeProductID).
 		Str("stripe_price_id", stripePriceID).
 		Int("weight", weight).
 		Interface("options", options).

@@ -2,6 +2,7 @@
 CREATE TABLE variants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
     product_id UUID NOT NULL REFERENCES products (id) ON DELETE CASCADE,
+    stripe_product_id VARCHAR(255) NOT NULL,
     price_id UUID NOT NULL REFERENCES prices (id),
     stripe_price_id VARCHAR(255) NOT NULL,
     active BOOLEAN DEFAULT TRUE,
@@ -18,6 +19,8 @@ CREATE TABLE variants (
 
 -- Create indexes for common query patterns
 CREATE INDEX idx_variants_product_id ON variants (product_id);
+
+CREATE INDEX idx_variants_stripe_product_id ON variants (stripe_product_id);
 
 CREATE INDEX idx_variants_price_id ON variants (price_id);
 

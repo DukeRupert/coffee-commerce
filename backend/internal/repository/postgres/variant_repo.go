@@ -38,10 +38,10 @@ func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) 
 
 	query := `
         INSERT INTO variants (
-            id, product_id, price_id, stripe_price_id, weight,
+            id, product_id, price_id, stripe_product_id, stripe_price_id, weight,
             options, active, stock_level, created_at, updated_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
         )
     `
 
@@ -51,6 +51,7 @@ func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) 
 		variant.ID,
 		variant.ProductID,
 		variant.PriceID,
+		variant.StripeProductID,
 		variant.StripePriceID,
 		variant.Weight,
 		optionsJSON,
@@ -75,7 +76,7 @@ func (r *variantRepository) Create(ctx context.Context, variant *model.Variant) 
 func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Variant, error) {
 	query := `
         SELECT
-            id, product_id, price_id, stripe_price_id, weight,
+            id, product_id, price_id, stripe_product_id, stripe_price_id, weight,
             options, active, stock_level, created_at, updated_at
         FROM variants
         WHERE id = $1
@@ -88,6 +89,7 @@ func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.V
 		&variant.ID,
 		&variant.ProductID,
 		&variant.PriceID,
+		&variant.StripeProductID,
 		&variant.StripePriceID,
 		&variant.Weight,
 		&optionsJSON,
@@ -121,7 +123,7 @@ func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.V
 func (r *variantRepository) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*model.Variant, error) {
 	query := `
         SELECT
-            id, product_id, price_id, stripe_price_id, weight,
+            id, product_id, price_id, stripe_product_id, stripe_price_id, weight,
             options, active, stock_level, created_at, updated_at
         FROM variants
         WHERE product_id = $1
@@ -144,6 +146,7 @@ func (r *variantRepository) GetByProductID(ctx context.Context, productID uuid.U
 			&variant.ID,
 			&variant.ProductID,
 			&variant.PriceID,
+			&variant.StripeProductID,
 			&variant.StripePriceID,
 			&variant.Weight,
 			&optionsJSON,

@@ -70,7 +70,7 @@ type VariantCreatedPayload struct {
 	PriceID   string `json:"price_id"`
 
 	// Stripe IDs
-	StripeID      string `json:"stripe_id"` // Stripe product ID
+	StripeProductID      string `json:"stripe_id"` // Stripe product ID
 	StripePriceID string `json:"stripe_price_id"`
 
 	// Variant details

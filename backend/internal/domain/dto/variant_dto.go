@@ -10,13 +10,14 @@ import (
 
 // VariantCreateDTO represents the data needed to create a new variant
 type VariantCreateDTO struct {
-	ProductID     uuid.UUID `json:"product_id"`
-	PriceID       uuid.UUID `json:"price_id"`
-	StripePriceID string    `json:"stripe_price_id"`
-	Weight        string    `json:"weight"`
-	Grind         string    `json:"grind"`
-	Active        bool      `json:"active"`
-	StockLevel    int       `json:"stock_level"`
+	ProductID       uuid.UUID `json:"product_id"`
+	PriceID         uuid.UUID `json:"price_id"`
+	StripeProductID string    `json:"stripe_product_id"`
+	StripePriceID   string    `json:"stripe_price_id"`
+	Weight          string    `json:"weight"`
+	Grind           string    `json:"grind"`
+	Active          bool      `json:"active"`
+	StockLevel      int       `json:"stock_level"`
 }
 
 // Valid validates the VariantCreateDTO
@@ -29,6 +30,10 @@ func (v *VariantCreateDTO) Valid(ctx context.Context) map[string]string {
 
 	if v.PriceID == uuid.Nil {
 		problems["price_id"] = "price ID is required"
+	}
+
+	if v.StripeProductID == "" {
+		problems["stripe_product_id"] = "Stripe product ID is required"
 	}
 
 	if v.StripePriceID == "" {
@@ -56,13 +61,14 @@ func (v *VariantCreateDTO) Valid(ctx context.Context) map[string]string {
 
 // VariantUpdateDTO represents the data needed to update an existing variant
 type VariantUpdateDTO struct {
-	ProductID     *uuid.UUID `json:"product_id,omitempty"`
-	PriceID       *uuid.UUID `json:"price_id,omitempty"`
-	StripePriceID *string    `json:"stripe_price_id,omitempty"`
-	Weight        *string    `json:"weight,omitempty"`
-	Grind         *string    `json:"grind,omitempty"`
-	Active        *bool      `json:"active,omitempty"`
-	StockLevel    *int       `json:"stock_level,omitempty"`
+	ProductID       *uuid.UUID `json:"product_id,omitempty"`
+	PriceID         *uuid.UUID `json:"price_id,omitempty"`
+	StripeProductID *string    `json:"stripe_product_id,omitempty"`
+	StripePriceID   *string    `json:"stripe_price_id,omitempty"`
+	Weight          *string    `json:"weight,omitempty"`
+	Grind           *string    `json:"grind,omitempty"`
+	Active          *bool      `json:"active,omitempty"`
+	StockLevel      *int       `json:"stock_level,omitempty"`
 }
 
 // Valid validates the VariantUpdateDTO
@@ -75,6 +81,10 @@ func (v *VariantUpdateDTO) Valid(ctx context.Context) map[string]string {
 
 	if v.PriceID != nil && *v.PriceID == uuid.Nil {
 		problems["price_id"] = "price ID cannot be empty when provided"
+	}
+
+	if v.StripeProductID != nil && *v.StripeProductID == "" {
+		problems["stripe_product_id"] = "Stripe product ID cannot be empty when provided"
 	}
 
 	if v.StripePriceID != nil && *v.StripePriceID == "" {
