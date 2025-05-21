@@ -162,14 +162,114 @@ func (s *variantService) handleProductCreated(data []byte) {
 	s.queueVariantCreation(payload.ProductID, optionKeys, combinations, payload)
 }
 
-// createDefaultPrice creates a default price for a product without options
+// createDefaultPrice creates a default price and variant for a product without options
 func (s *variantService) createDefaultPrice(productID string) error {
-	// TODO: Call Stripe API to create a price for the product
-	// This is just a stub for now
-	s.logger.Info().
-		Str("product_id", productID).
-		Msg("Stub: Would create a default price for product without options")
-	return nil
+    ctx := context.Background()
+    
+    // Parse product ID
+    prodID, err := uuid.Parse(productID)
+    if err != nil {
+        return fmt.Errorf("invalid product ID: %w", err)
+    }
+    
+    // Get product details
+    product, err := s.productRepo.GetByID(ctx, prodID)
+    if err != nil {
+        return fmt.Errorf("failed to get product: %w", err)
+    }
+    
+    if product == nil {
+        return fmt.Errorf("product not found: %s", productID)
+    }
+    
+    // Create a default price in our database
+    priceID := uuid.New()
+    stripePriceID := fmt.Sprintf("price_%s", uuid.New().String())
+    
+    price := &model.Price{
+        ID:            priceID,
+        ProductID:     prodID,
+        Name:          fmt.Sprintf("%s - Default", product.Name),
+        Amount:        1000, // Default $10.00
+        Currency:      "USD",
+        Type:          "one_time", // Default to one-time price
+        Interval:      "",
+        IntervalCount: 0,
+        Active:        true,
+        StripeID:      stripePriceID,
+        CreatedAt:     time.Now(),
+        UpdatedAt:     time.Now(),
+    }
+    
+    s.logger.Debug().
+        Str("price_id", price.ID.String()).
+        Str("product_id", prodID.String()).
+        Int64("amount", price.Amount).
+        Str("currency", price.Currency).
+        Msg("Creating default price record")
+    
+    err = s.priceRepo.Create(ctx, price)
+    if err != nil {
+        return fmt.Errorf("failed to create price record: %w", err)
+    }
+    
+    // Create a default variant
+    variant := &model.Variant{
+        ID:            uuid.New(),
+        ProductID:     prodID,
+        PriceID:       priceID,
+        StripePriceID: stripePriceID,
+        Weight:        product.Weight,
+        Options:       make(map[string]string), // Empty options for default variant
+        Active:        true,
+        StockLevel:    product.StockLevel, // Use product's initial stock level
+        CreatedAt:     time.Now(),
+        UpdatedAt:     time.Now(),
+    }
+    
+    s.logger.Debug().
+        Str("variant_id", variant.ID.String()).
+        Str("product_id", prodID.String()).
+        Str("price_id", priceID.String()).
+        Msg("Creating default variant record")
+    
+    err = s.variantRepo.Create(ctx, variant)
+    if err != nil {
+        return fmt.Errorf("failed to create default variant: %w", err)
+    }
+    
+    // Publish variant created event
+    variantCreatedPayload := events.VariantCreatedPayload{
+        VariantID:     variant.ID.String(),
+        ProductID:     productID,
+        PriceID:       priceID.String(),
+        StripeID:      "prod_" + uuid.New().String(), // Simulate Stripe product ID
+        StripePriceID: stripePriceID,
+        Weight:        fmt.Sprintf("%dg", product.Weight),
+        Grind:         "Whole Bean", // Default grind type
+        OptionValues:  map[string]string{},
+        Amount:        price.Amount,
+        Currency:      price.Currency,
+        Active:        true,
+        StockLevel:    product.StockLevel,
+        CreatedAt:     time.Now(),
+    }
+    
+    err = s.eventBus.Publish(events.TopicVariantCreated, variantCreatedPayload)
+    if err != nil {
+        s.logger.Error().Err(err).
+            Str("variant_id", variant.ID.String()).
+            Msg("Failed to publish default variant created event")
+        // Don't return the error since the variant is already created in DB
+    }
+    
+    s.logger.Info().
+        Str("variant_id", variant.ID.String()).
+        Str("product_id", productID).
+        Str("price_id", priceID.String()).
+        Msg("Successfully created default variant")
+    
+    return nil
 }
 
 // generateOptionCombinations generates all possible combinations of option values
