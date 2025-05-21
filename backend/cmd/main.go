@@ -81,7 +81,20 @@ func main() {
 		eventMetrics,
 		"main-service",
 	)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Event bus failed to start")
+	}
 	defer eventBus.Close()
+
+	// Debug
+	logger.Debug().
+    Str("stripe_key_status", func() string {
+        if cfg.Stripe.SecretKey == "" {
+            return "empty"
+        }
+        return "set"
+    }()).
+    Msg("Stripe configuration loaded")
 
 	// Initialize repositories
 	productRepo := postgres.NewProductRepository(db, &logger)
@@ -99,7 +112,7 @@ func main() {
 	// Initialize handlers
 	productHandler := handler.NewProductHandler(&logger, productService, variantRepo, priceRepo)
 	variantHandler := handler.NewVariantHandler(&logger, variantRepo, productRepo)
-	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus)
+	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus, productRepo, priceRepo, variantRepo)
 
 	// Start echo server
 	e := echo.New()
