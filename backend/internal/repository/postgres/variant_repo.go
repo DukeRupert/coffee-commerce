@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
+	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -21,7 +22,7 @@ type variantRepository struct {
 }
 
 // NewVariantRepository creates a new VariantRepository
-func NewVariantRepository(db *DB, logger *zerolog.Logger) *variantRepository {
+func NewVariantRepository(db *DB, logger *zerolog.Logger) interfaces.VariantRepository {
 	return &variantRepository{
 		db:     db,
 		logger: logger.With().Str("component", "variant_repository").Logger(),
@@ -80,6 +81,53 @@ func (r *variantRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.V
             options, active, stock_level, created_at, updated_at
         FROM variants
         WHERE id = $1
+    `
+
+	var variant model.Variant
+	var optionsJSON []byte
+
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&variant.ID,
+		&variant.ProductID,
+		&variant.PriceID,
+		&variant.StripeProductID,
+		&variant.StripePriceID,
+		&variant.Weight,
+		&optionsJSON,
+		&variant.Active,
+		&variant.StockLevel,
+		&variant.CreatedAt,
+		&variant.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // Variant not found
+		}
+		return nil, fmt.Errorf("failed to get variant: %w", err)
+	}
+
+	// Unmarshal the options JSON
+	if len(optionsJSON) > 0 {
+		if err := json.Unmarshal(optionsJSON, &variant.Options); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal options: %w", err)
+		}
+	} else {
+		// Initialize empty map if no options stored
+		variant.Options = make(map[string]string)
+	}
+
+	return &variant, nil
+}
+
+// GetByID retrieves a variant by its ID
+func (r *variantRepository) GetByStripeID(ctx context.Context, id string) (*model.Variant, error) {
+	query := `
+        SELECT
+            id, product_id, price_id, stripe_product_id, stripe_price_id, weight,
+            options, active, stock_level, created_at, updated_at
+        FROM variants
+        WHERE stripe_product_id = $1
     `
 
 	var variant model.Variant

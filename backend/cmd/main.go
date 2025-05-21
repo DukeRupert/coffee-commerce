@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/dukerupert/coffee-commerce/config"
 	"github.com/dukerupert/coffee-commerce/internal/api/handler"
@@ -32,7 +33,7 @@ func init() {
 
 func main() {
 	// Initialize logger
-	logger  := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: zerolog.TimeFormatUnix}).With().Timestamp().Logger()
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: zerolog.TimeFormatUnix}).With().Timestamp().Logger()
 
 	debug := flag.Bool("debug", false, "sets log level to debug")
 	metricsAddr := flag.String("metrics-addr", ":9090", "The address the metrics server binds to")
@@ -88,13 +89,13 @@ func main() {
 
 	// Debug
 	logger.Debug().
-    Str("stripe_key_status", func() string {
-        if cfg.Stripe.SecretKey == "" {
-            return "empty"
-        }
-        return "set"
-    }()).
-    Msg("Stripe configuration loaded")
+		Str("stripe_key_status", func() string {
+			if cfg.Stripe.SecretKey == "" {
+				return "empty"
+			}
+			return "set"
+		}()).
+		Msg("Stripe configuration loaded")
 
 	// Initialize repositories
 	productRepo := postgres.NewProductRepository(db, &logger)
@@ -119,6 +120,31 @@ func main() {
 
 	// middleware
 	e.Use(middleware.RequestID())
+	e.Use(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
+		Skipper: func(c echo.Context) bool {
+			// Get the current request path
+			path := c.Request().URL.Path
+
+			// Create patterns for paths that should skip trailing slash
+			skipPatterns := []string{
+				"/api/v1/products/", // This will match /api/v1/products/123
+				"/api/v1/variants/",
+				"/api/v1/subscriptions/",
+				// Add other API path prefixes as needed
+			}
+
+			// Check if the path starts with any of the skip patterns
+			// AND has additional segments (indicating a parameter)
+			for _, pattern := range skipPatterns {
+				if strings.HasPrefix(path, pattern) && len(path) > len(pattern) {
+					return true
+				}
+			}
+
+			return false
+		},
+	}))
+
 	e.Use(custommiddleware.RequestLogger(&logger))
 	corsConfig := custommiddleware.CORSConfig{
 		AllowOrigins: []string{
