@@ -6,39 +6,40 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	events "github.com/dukerupert/coffee-commerce/internal/event"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
+	"github.com/dukerupert/coffee-commerce/internal/stripe"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	stripeSDK "github.com/stripe/stripe-go/v82"
 )
-
-// VariantService defines the interface for variant-related operations
-type VariantService interface {
-	// Methods will be added later
-}
 
 // variantService implements VariantService
 type variantService struct {
-	logger      zerolog.Logger
-	eventBus    events.EventBus
-	variantRepo interfaces.VariantRepository
-	productRepo interfaces.ProductRepository
-	priceRepo   interfaces.PriceRepository
+	logger        zerolog.Logger
+	eventBus      events.EventBus
+	variantRepo   interfaces.VariantRepository
+	productRepo   interfaces.ProductRepository
+	priceRepo     interfaces.PriceRepository
+	stripeService *stripe.Service
 }
 
 // NewVariantService creates a new variant service and subscribes to relevant events
-func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variantRepo interfaces.VariantRepository, productRepo interfaces.ProductRepository, priceRepo interfaces.PriceRepository) (VariantService, error) {
+func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variantRepo interfaces.VariantRepository, productRepo interfaces.ProductRepository, priceRepo interfaces.PriceRepository, stripeService *stripe.Service) (interfaces.VariantService, error) {
 	subLogger := logger.With().Str("component", "variant_service").Logger()
 
 	s := &variantService{
-		logger:      subLogger,
-		eventBus:    eventBus,
-		variantRepo: variantRepo,
-		productRepo: productRepo,
-		priceRepo:   priceRepo,
+		logger:        subLogger,
+		eventBus:      eventBus,
+		variantRepo:   variantRepo,
+		productRepo:   productRepo,
+		priceRepo:     priceRepo,
+		stripeService: stripeService,
 	}
 
 	// Subscribe to product created events
@@ -164,112 +165,112 @@ func (s *variantService) handleProductCreated(data []byte) {
 
 // createDefaultPrice creates a default price and variant for a product without options
 func (s *variantService) createDefaultPrice(productID string) error {
-    ctx := context.Background()
-    
-    // Parse product ID
-    prodID, err := uuid.Parse(productID)
-    if err != nil {
-        return fmt.Errorf("invalid product ID: %w", err)
-    }
-    
-    // Get product details
-    product, err := s.productRepo.GetByID(ctx, prodID)
-    if err != nil {
-        return fmt.Errorf("failed to get product: %w", err)
-    }
-    
-    if product == nil {
-        return fmt.Errorf("product not found: %s", productID)
-    }
-    
-    // Create a default price in our database
-    priceID := uuid.New()
-    stripePriceID := fmt.Sprintf("price_%s", uuid.New().String())
-    
-    price := &model.Price{
-        ID:            priceID,
-        ProductID:     prodID,
-        Name:          fmt.Sprintf("%s - Default", product.Name),
-        Amount:        1000, // Default $10.00
-        Currency:      "USD",
-        Type:          "one_time", // Default to one-time price
-        Interval:      "",
-        IntervalCount: 0,
-        Active:        true,
-        StripeID:      stripePriceID,
-        CreatedAt:     time.Now(),
-        UpdatedAt:     time.Now(),
-    }
-    
-    s.logger.Debug().
-        Str("price_id", price.ID.String()).
-        Str("product_id", prodID.String()).
-        Int64("amount", price.Amount).
-        Str("currency", price.Currency).
-        Msg("Creating default price record")
-    
-    err = s.priceRepo.Create(ctx, price)
-    if err != nil {
-        return fmt.Errorf("failed to create price record: %w", err)
-    }
-    
-    // Create a default variant
-    variant := &model.Variant{
-        ID:            uuid.New(),
-        ProductID:     prodID,
-        PriceID:       priceID,
-        StripePriceID: stripePriceID,
-        Weight:        product.Weight,
-        Options:       make(map[string]string), // Empty options for default variant
-        Active:        true,
-        StockLevel:    product.StockLevel, // Use product's initial stock level
-        CreatedAt:     time.Now(),
-        UpdatedAt:     time.Now(),
-    }
-    
-    s.logger.Debug().
-        Str("variant_id", variant.ID.String()).
-        Str("product_id", prodID.String()).
-        Str("price_id", priceID.String()).
-        Msg("Creating default variant record")
-    
-    err = s.variantRepo.Create(ctx, variant)
-    if err != nil {
-        return fmt.Errorf("failed to create default variant: %w", err)
-    }
-    
-    // Publish variant created event
-    variantCreatedPayload := events.VariantCreatedPayload{
-        VariantID:     variant.ID.String(),
-        ProductID:     productID,
-        PriceID:       priceID.String(),
-        StripeID:      "prod_" + uuid.New().String(), // Simulate Stripe product ID
-        StripePriceID: stripePriceID,
-        Weight:        fmt.Sprintf("%dg", product.Weight),
-        Grind:         "Whole Bean", // Default grind type
-        OptionValues:  map[string]string{},
-        Amount:        price.Amount,
-        Currency:      price.Currency,
-        Active:        true,
-        StockLevel:    product.StockLevel,
-        CreatedAt:     time.Now(),
-    }
-    
-    err = s.eventBus.Publish(events.TopicVariantCreated, variantCreatedPayload)
-    if err != nil {
-        s.logger.Error().Err(err).
-            Str("variant_id", variant.ID.String()).
-            Msg("Failed to publish default variant created event")
-        // Don't return the error since the variant is already created in DB
-    }
-    
-    s.logger.Info().
-        Str("variant_id", variant.ID.String()).
-        Str("product_id", productID).
-        Str("price_id", priceID.String()).
-        Msg("Successfully created default variant")
-    
-    return nil
+	ctx := context.Background()
+
+	// Parse product ID
+	prodID, err := uuid.Parse(productID)
+	if err != nil {
+		return fmt.Errorf("invalid product ID: %w", err)
+	}
+
+	// Get product details
+	product, err := s.productRepo.GetByID(ctx, prodID)
+	if err != nil {
+		return fmt.Errorf("failed to get product: %w", err)
+	}
+
+	if product == nil {
+		return fmt.Errorf("product not found: %s", productID)
+	}
+
+	// Create a default price in our database
+	priceID := uuid.New()
+	stripePriceID := fmt.Sprintf("price_%s", uuid.New().String())
+
+	price := &model.Price{
+		ID:            priceID,
+		ProductID:     prodID,
+		Name:          fmt.Sprintf("%s - Default", product.Name),
+		Amount:        1000, // Default $10.00
+		Currency:      "USD",
+		Type:          "one_time", // Default to one-time price
+		Interval:      "",
+		IntervalCount: 0,
+		Active:        true,
+		StripeID:      stripePriceID,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	s.logger.Debug().
+		Str("price_id", price.ID.String()).
+		Str("product_id", prodID.String()).
+		Int64("amount", price.Amount).
+		Str("currency", price.Currency).
+		Msg("Creating default price record")
+
+	err = s.priceRepo.Create(ctx, price)
+	if err != nil {
+		return fmt.Errorf("failed to create price record: %w", err)
+	}
+
+	// Create a default variant
+	variant := &model.Variant{
+		ID:            uuid.New(),
+		ProductID:     prodID,
+		PriceID:       priceID,
+		StripePriceID: stripePriceID,
+		Weight:        product.Weight,
+		Options:       make(map[string]string), // Empty options for default variant
+		Active:        true,
+		StockLevel:    product.StockLevel, // Use product's initial stock level
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	s.logger.Debug().
+		Str("variant_id", variant.ID.String()).
+		Str("product_id", prodID.String()).
+		Str("price_id", priceID.String()).
+		Msg("Creating default variant record")
+
+	err = s.variantRepo.Create(ctx, variant)
+	if err != nil {
+		return fmt.Errorf("failed to create default variant: %w", err)
+	}
+
+	// Publish variant created event
+	variantCreatedPayload := events.VariantCreatedPayload{
+		VariantID:     variant.ID.String(),
+		ProductID:     productID,
+		PriceID:       priceID.String(),
+		StripeID:      "prod_" + uuid.New().String(), // Simulate Stripe product ID
+		StripePriceID: stripePriceID,
+		Weight:        fmt.Sprintf("%dg", product.Weight),
+		Grind:         "Whole Bean", // Default grind type
+		OptionValues:  map[string]string{},
+		Amount:        price.Amount,
+		Currency:      price.Currency,
+		Active:        true,
+		StockLevel:    product.StockLevel,
+		CreatedAt:     time.Now(),
+	}
+
+	err = s.eventBus.Publish(events.TopicVariantCreated, variantCreatedPayload)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("variant_id", variant.ID.String()).
+			Msg("Failed to publish default variant created event")
+		// Don't return the error since the variant is already created in DB
+	}
+
+	s.logger.Info().
+		Str("variant_id", variant.ID.String()).
+		Str("product_id", productID).
+		Str("price_id", priceID.String()).
+		Msg("Successfully created default variant")
+
+	return nil
 }
 
 // generateOptionCombinations generates all possible combinations of option values
@@ -400,7 +401,7 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		Msg("Processing variant creation with Stripe integration")
 
 	// Create a Stripe product for this variant
-	stripeProductObj, err := s.createStripeProduct(payload)
+	stripeProduct, err := s.createStripeProduct(payload)
 	if err != nil {
 		s.logger.Error().Err(err).
 			Str("product_id", payload.ProductID).
@@ -409,24 +410,11 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		return
 	}
 
-	// Extract the stripe product ID from our mock object
-	var stripeProductID string
-	switch prod := stripeProductObj.(type) {
-	case struct {
-		ID          string
-		Name        string
-		Description string
-		Metadata    map[string]string
-	}:
-		stripeProductID = prod.ID
-	default:
-		// In a real implementation with the Stripe SDK, you would use:
-		// stripeProductID = stripeProductObj.ID
-		stripeProductID = fmt.Sprintf("prod_%s", uuid.New().String())
-	}
+	// Extract the Stripe product ID directly
+	stripeProductID := stripeProduct.ID
 
 	// Create a default price for this product
-	stripePriceObj, err := s.createStripePrice(stripeProductID, payload)
+	stripePrice, err := s.createStripePrice(stripeProductID, payload)
 	if err != nil {
 		s.logger.Error().Err(err).
 			Str("product_id", payload.ProductID).
@@ -435,21 +423,8 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		return
 	}
 
-	// Extract the stripe price ID from our mock object
-	var stripePriceID string
-	switch price := stripePriceObj.(type) {
-	case struct {
-		ID         string
-		ProductID  string
-		UnitAmount int64
-		Currency   string
-	}:
-		stripePriceID = price.ID
-	default:
-		// In a real implementation with the Stripe SDK, you would use:
-		// stripePriceID = stripePriceObj.ID
-		stripePriceID = fmt.Sprintf("price_%s", uuid.New().String())
-	}
+	// Extract the Stripe price ID directly
+	stripePriceID := stripePrice.ID
 
 	// Create the variant in our database
 	variant, err := s.createVariant(payload, stripeProductID, stripePriceID)
@@ -466,9 +441,16 @@ func (s *variantService) handleVariantQueued(data []byte) {
 	variantCreatedPayload := events.VariantCreatedPayload{
 		VariantID:     variant.ID.String(),
 		ProductID:     payload.ProductID,
+		PriceID:       variant.PriceID.String(),  // Include the internal price ID
 		StripeID:      stripeProductID,
 		StripePriceID: stripePriceID,
+		Weight:        getOptionValue(payload.OptionValues, "weight", ""),
+		Grind:         getOptionValue(payload.OptionValues, "grind", ""),
 		OptionValues:  payload.OptionValues,
+		Amount:        stripePrice.UnitAmount,
+		Currency:      string(stripePrice.Currency),
+		Active:        variant.Active,
+		StockLevel:    variant.StockLevel,
 		CreatedAt:     time.Now(),
 	}
 
@@ -484,99 +466,109 @@ func (s *variantService) handleVariantQueued(data []byte) {
 		Str("product_id", payload.ProductID).
 		Str("stripe_product_id", stripeProductID).
 		Str("stripe_price_id", stripePriceID).
+		Int64("price_amount", stripePrice.UnitAmount).
+		Str("currency", string(stripePrice.Currency)).
 		Msg("Successfully created variant with Stripe integration")
 }
 
-// createStripeProduct creates a new product in Stripe
-func (s *variantService) createStripeProduct(payload events.VariantQueuedPayload) (interface{}, error) {
-	// Create the Stripe product
-	// Note: This would typically use the Stripe Go SDK
-	s.logger.Info().
-		Str("product_name", payload.ProductName).
-		Msg("Creating Stripe product")
-
-	// In a real implementation, this would be:
-	/*
-	   params := &stripe.ProductParams{
-	       Name:        stripe.String(payload.ProductName),
-	       Description: stripe.String(payload.Description),
-	   }
-
-	   if payload.ImageURL != "" {
-	       params.Images = []*string{stripe.String(payload.ImageURL)}
-	   }
-
-	   // Add option values as metadata
-	   params.Metadata = make(map[string]string)
-	   for key, value := range payload.OptionValues {
-	       params.Metadata[key] = value
-	   }
-
-	   product, err := product.New(params)
-	   if err != nil {
-	       return nil, fmt.Errorf("failed to create Stripe product: %w", err)
-	   }
-
-	   return product, nil
-	*/
-
-	// For now, we'll simulate creating a Stripe product
-	// Using a simple struct instead of the actual Stripe type
-	mockProduct := struct {
-		ID          string
-		Name        string
-		Description string
-		Metadata    map[string]string
-	}{
-		ID:          "prod_" + uuid.New().String(),
-		Name:        payload.ProductName,
-		Description: payload.Description,
-		Metadata:    payload.OptionValues,
+// Helper function to safely get option values with a default fallback
+func getOptionValue(options map[string]string, key, defaultValue string) string {
+	if value, exists := options[key]; exists {
+		return value
 	}
+	return defaultValue
+}
 
-	return mockProduct, nil
+// createStripeProduct creates a new product in Stripe
+func (s *variantService) createStripeProduct(payload events.VariantQueuedPayload) (*stripeSDK.Product, error) {
+	// Prepare metadata from options
+	metadata := make(map[string]string)
+	for k, v := range payload.OptionValues {
+		metadata[k] = v
+	}
+	
+	// Add original product ID to metadata
+	metadata["original_product_id"] = payload.ProductID
+	
+	// Create images array if image URL is provided
+	var images []string
+	if payload.ImageURL != "" {
+		images = []string{payload.ImageURL}
+	}
+	
+	// Create the product in Stripe
+	product, err := s.stripeService.CreateProduct(
+		payload.ProductName,
+		payload.Description,
+		images,
+		metadata,
+	)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Stripe product: %w", err)
+	}
+	
+	return product, nil
 }
 
 // createStripePrice creates a new price in Stripe
-func (s *variantService) createStripePrice(stripeProductID string, payload events.VariantQueuedPayload) (interface{}, error) {
-	// Create the Stripe price
-	s.logger.Info().
-		Str("stripe_product_id", stripeProductID).
-		Int64("price", payload.DefaultPrice).
-		Str("currency", payload.Currency).
-		Msg("Creating Stripe price")
-
-	// In a real implementation, this would be:
-	/*
-	   params := &stripe.PriceParams{
-	       Product:    stripe.String(stripeProductID),
-	       UnitAmount: stripe.Int64(payload.DefaultPrice),
-	       Currency:   stripe.String(payload.Currency),
-	   }
-
-	   price, err := price.New(params)
-	   if err != nil {
-	       return nil, fmt.Errorf("failed to create Stripe price: %w", err)
-	   }
-
-	   return price, nil
-	*/
-
-	// For now, we'll simulate creating a Stripe price
-	// Using a simple struct instead of the actual Stripe type
-	mockPrice := struct {
-		ID         string
-		ProductID  string
-		UnitAmount int64
-		Currency   string
-	}{
-		ID:         "price_" + uuid.New().String(),
-		ProductID:  stripeProductID,
-		UnitAmount: payload.DefaultPrice,
-		Currency:   payload.Currency,
+func (s *variantService) createStripePrice(stripeProductID string, payload events.VariantQueuedPayload) (*stripeSDK.Price, error) {
+	// Determine if this is a recurring price
+	recurring := false
+	interval := ""
+	intervalCount := int64(0)
+	
+	// Check for subscription options in the variant's metadata
+	// If this is a coffee subscription, it would typically be monthly or bi-weekly
+	if value, exists := payload.OptionValues["subscription_interval"]; exists {
+		recurring = true
+		
+		// Parse interval from metadata - should be 'day', 'week', 'month', or 'year'
+		interval = value
+		
+		// Get interval count if available, default to 1
+		if countValue, exists := payload.OptionValues["subscription_interval_count"]; exists {
+			if count, err := strconv.ParseInt(countValue, 10, 64); err == nil {
+				intervalCount = count
+			} else {
+				intervalCount = 1
+			}
+		} else {
+			intervalCount = 1
+		}
 	}
-
-	return mockPrice, nil
+	
+	// Set a sane default price if none provided
+	amount := payload.DefaultPrice
+	if amount <= 0 {
+		// Default to $10.00 if no price specified
+		amount = 1000
+		s.logger.Warn().
+			Str("product_id", payload.ProductID).
+			Msg("No price specified for variant, defaulting to $10.00")
+	}
+	
+	// Set default currency if none provided
+	currency := payload.Currency
+	if currency == "" {
+		currency = "USD"
+	}
+	
+	// Create the price in Stripe
+	price, err := s.stripeService.CreatePrice(
+		stripeProductID,
+		amount,
+		currency,
+		recurring,
+		interval,
+		intervalCount,
+	)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Stripe price: %w", err)
+	}
+	
+	return price, nil
 }
 
 // createVariant creates a new variant in our database
@@ -613,13 +605,27 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		Amount:    price,
 		Currency:  currency,
 		Type:      "one_time", // Default to one-time price
-		// For one-time prices, explicitly set interval and interval_count to empty values
-		Interval:      "", // This will be stored as NULL in the database
-		IntervalCount: 0,  // This will be stored as NULL in the database
-		Active:        true,
-		StripeID:      stripePriceID,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		Active:    true,
+		StripeID:  stripePriceID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Check if this is a subscription price
+	if value, exists := payload.OptionValues["subscription_interval"]; exists {
+		priceRecord.Type = "recurring"
+		priceRecord.Interval = value
+		
+		// Get interval count if available
+		if countValue, exists := payload.OptionValues["subscription_interval_count"]; exists {
+			if count, err := strconv.Atoi(countValue); err == nil {
+				priceRecord.IntervalCount = count
+			} else {
+				priceRecord.IntervalCount = 1 
+			}
+		} else {
+			priceRecord.IntervalCount = 1
+		}
 	}
 
 	s.logger.Debug().
@@ -627,6 +633,9 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		Str("product_id", productID.String()).
 		Int64("amount", price).
 		Str("currency", currency).
+		Str("type", priceRecord.Type).
+		Str("interval", priceRecord.Interval).
+		Int("interval_count", priceRecord.IntervalCount).
 		Msg("Creating price record")
 
 	err = s.priceRepo.Create(ctx, priceRecord)
@@ -637,21 +646,30 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 	// Initialize the options map for the variant
 	options := make(map[string]string)
 
+	// Default weight in grams
+	weight := 1 
+
 	// Check if OptionValues is nil before accessing it
 	if payload.OptionValues != nil {
 		// Populate the options map with all options
 		for key, value := range payload.OptionValues {
 			options[key] = value
 		}
+		
+		// Try to parse weight from options if present
+		if weightStr, ok := options["weight"]; ok {
+			// Convert weight option (like "12oz") to grams if possible
+			weight = convertWeightToGrams(weightStr)
+		}
 	}
 
-	// Create the variant without explicit weight and grind fields
+	// Create the variant record
 	variant := &model.Variant{
 		ID:            uuid.New(),
 		ProductID:     productID,
 		PriceID:       priceRecord.ID,
 		StripePriceID: stripePriceID,
-		Weight:        1, // Default weight in grams
+		Weight:        weight,
 		Options:       options,
 		Active:        true,
 		StockLevel:    0, // Default to 0 until specifically set
@@ -663,6 +681,8 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 		Str("variant_id", variant.ID.String()).
 		Str("product_id", productID.String()).
 		Str("price_id", priceRecord.ID.String()).
+		Str("stripe_price_id", stripePriceID).
+		Int("weight", weight).
 		Interface("options", options).
 		Msg("Creating variant record")
 
@@ -672,4 +692,31 @@ func (s *variantService) createVariant(payload events.VariantQueuedPayload, stri
 	}
 
 	return variant, nil
+}
+
+// convertWeightToGrams converts weight strings like "12oz" to grams
+func convertWeightToGrams(weightStr string) int {
+	// Common conversion factors
+	const (
+		gramsPerOz  = 28
+		gramsPerLb  = 454
+	)
+	
+	// Try to parse simple cases like "12oz" or "3lb"
+	if strings.HasSuffix(weightStr, "oz") {
+		value := strings.TrimSuffix(weightStr, "oz")
+		if oz, err := strconv.Atoi(value); err == nil {
+			return oz * gramsPerOz
+		}
+	}
+	
+	if strings.HasSuffix(weightStr, "lb") {
+		value := strings.TrimSuffix(weightStr, "lb")
+		if lb, err := strconv.Atoi(value); err == nil {
+			return lb * gramsPerLb
+		}
+	}
+	
+	// Default to 1 gram if we can't parse
+	return 1
 }

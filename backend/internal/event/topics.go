@@ -40,3 +40,26 @@ const (
 	TopicOrderShipped       = "orders.shipped"
 	TopicOrderDelivered     = "orders.delivered"
 )
+
+// Stripe-related topics
+const (
+	TopicStripeProductCreated = "stripe.products.created"
+	TopicStripeProductUpdated = "stripe.products.updated"
+	TopicStripeProductDeleted = "stripe.products.deleted"
+	
+	TopicStripePriceCreated = "stripe.prices.created"
+	TopicStripePriceUpdated = "stripe.prices.updated"
+	TopicStripePriceDeleted = "stripe.prices.deleted"
+	
+	TopicStripeCustomerCreated = "stripe.customers.created"
+	TopicStripeCustomerUpdated = "stripe.customers.updated"
+	TopicStripeCustomerDeleted = "stripe.customers.deleted"
+	
+	TopicStripeSubscriptionCreated = "stripe.subscriptions.created"
+	TopicStripeSubscriptionUpdated = "stripe.subscriptions.updated"
+	TopicStripeSubscriptionCanceled = "stripe.subscriptions.canceled"
+	
+	TopicStripeCheckoutCompleted = "stripe.checkout.completed"
+	TopicStripeInvoicePaid = "stripe.invoice.paid"
+	TopicStripeInvoicePaymentFailed = "stripe.invoice.payment_failed"
+)

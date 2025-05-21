@@ -13,6 +13,7 @@ import (
 	custommiddleware "github.com/dukerupert/coffee-commerce/internal/middleware"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/dukerupert/coffee-commerce/internal/service"
+	"github.com/dukerupert/coffee-commerce/internal/stripe"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -88,8 +89,9 @@ func main() {
 	priceRepo := postgres.NewPriceRepository(db, &logger)
 
 	// Initialize services
+	stripeService := stripe.NewStripeService(&logger, &cfg.Stripe)
 	productService := service.NewProductService(&logger, eventBus, productRepo)
-	_, err = service.NewVariantService(&logger, eventBus, variantRepo, productRepo, priceRepo)
+	_, err = service.NewVariantService(&logger, eventBus, variantRepo, productRepo, priceRepo, stripeService)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize variant service")
 	}
@@ -97,6 +99,7 @@ func main() {
 	// Initialize handlers
 	productHandler := handler.NewProductHandler(&logger, productService, variantRepo, priceRepo)
 	variantHandler := handler.NewVariantHandler(&logger, variantRepo, productRepo)
+	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus)
 
 	// Start echo server
 	e := echo.New()
@@ -118,6 +121,7 @@ func main() {
 
 	api := e.Group("/api")
 	v1 := api.Group("/v1")
+	v1.POST("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
 	products := v1.Group("/products")
 	products.GET("/", productHandler.List)
 	products.POST("/", productHandler.Create)
