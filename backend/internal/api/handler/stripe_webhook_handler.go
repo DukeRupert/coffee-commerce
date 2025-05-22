@@ -30,13 +30,14 @@ type StripeWebhookHandler struct {
 	productRepo  interfaces.ProductRepository
 	priceRepo    interfaces.PriceRepository
 	variantRepo  interfaces.VariantRepository
+	syncRepo     interfaces.SyncHashRepository
 }
 
 func NewStripeWebhookHandler(
 	logger *zerolog.Logger,
 	stripeConfig *config.StripeConfig,
 	eventBus events.EventBus, productRepo interfaces.ProductRepository, priceRepo interfaces.PriceRepository,
-	variantRepo interfaces.VariantRepository) *StripeWebhookHandler {
+	variantRepo interfaces.VariantRepository, syncRepo interfaces.SyncHashRepository) *StripeWebhookHandler {
 
 	return &StripeWebhookHandler{
 		logger:       logger.With().Str("component", "stripe_webhook_handler").Logger(),
@@ -45,6 +46,7 @@ func NewStripeWebhookHandler(
 		productRepo:  productRepo,
 		priceRepo:    priceRepo,
 		variantRepo:  variantRepo,
+		syncRepo:     syncRepo,
 	}
 }
 
@@ -908,7 +910,7 @@ func (h *StripeWebhookHandler) handleProductUpdated(event stripe.Event) error {
 		// Update variant options from metadata
 		newOptions := make(map[string]string)
 		optionsUpdated := false
-		
+
 		for key, val := range stripeProduct.Metadata {
 			// Look for option fields (not prefixed with "option_" since these are variant-specific)
 			if key == "weight" || key == "grind" || strings.HasPrefix(key, "variant_") {
@@ -916,7 +918,7 @@ func (h *StripeWebhookHandler) handleProductUpdated(event stripe.Event) error {
 				if strings.HasPrefix(key, "variant_") {
 					optionKey = strings.TrimPrefix(key, "variant_")
 				}
-				
+
 				// Only update if the value has changed
 				if existingValue, exists := existingVariant.Options[optionKey]; !exists || existingValue != val {
 					newOptions[optionKey] = val

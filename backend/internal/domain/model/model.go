@@ -141,3 +141,29 @@ type SubscriptionWithDetails struct {
 	Amount        int64  `json:"amount"`         // Price amount in cents
 	Currency      string `json:"currency"`       // USD, EUR, etc.
 }
+
+// SyncHash represents a content hash for tracking sync state between systems
+type SyncHash struct {
+	ID              uuid.UUID `json:"id"`
+	VariantID       uuid.UUID `json:"variant_id"`
+	StripeProductID string    `json:"stripe_product_id"`
+	ContentHash     string    `json:"content_hash"`
+	HashAlgorithm   string    `json:"hash_algorithm"`
+	SyncSource      string    `json:"sync_source"` // 'stripe_webhook', 'api_call', etc.
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// Sync source constants for consistent usage
+const (
+	SyncSourceStripeWebhook = "stripe_webhook"
+	SyncSourceAPICall       = "api_call"
+	SyncSourceAdminPanel    = "admin_panel"
+	SyncSourceSystemSync    = "system_sync"
+)
+
+// Hash algorithm constants
+const (
+	HashAlgorithmSHA256 = "sha256"
+	HashAlgorithmSHA1   = "sha1" // For backwards compatibility if needed
+)

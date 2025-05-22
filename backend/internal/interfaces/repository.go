@@ -67,4 +67,30 @@ type PriceRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
+// SyncHashRepository defines operations for managing sync hash records
+type SyncHashRepository interface {
+	// Create adds a new sync hash record
+	Create(ctx context.Context, syncHash *model.SyncHash) error
+
+	// GetByVariantID retrieves the latest sync hash for a variant
+	GetByVariantID(ctx context.Context, variantID uuid.UUID) (*model.SyncHash, error)
+
+	// GetByStripeProductID retrieves the latest sync hash for a Stripe product
+	GetByStripeProductID(ctx context.Context, stripeProductID string) (*model.SyncHash, error)
+
+	// GetByVariantAndStripeID retrieves sync hash for specific variant-stripe product pair
+	GetByVariantAndStripeID(ctx context.Context, variantID uuid.UUID, stripeProductID string) (*model.SyncHash, error)
+
+	// Upsert creates or updates a sync hash record
+	Upsert(ctx context.Context, syncHash *model.SyncHash) error
+
+	// Delete removes a sync hash record
+	Delete(ctx context.Context, id uuid.UUID) error
+
+	// DeleteByVariantID removes all sync hash records for a variant
+	DeleteByVariantID(ctx context.Context, variantID uuid.UUID) error
+
+	// GetHashHistory retrieves historical hashes for debugging/audit purposes
+	GetHashHistory(ctx context.Context, variantID uuid.UUID, limit int) ([]*model.SyncHash, error)
+}
 

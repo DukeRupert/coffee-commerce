@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/dukerupert/coffee-commerce/config"
 	"github.com/dukerupert/coffee-commerce/internal/api/handler"
@@ -101,6 +100,7 @@ func main() {
 	productRepo := postgres.NewProductRepository(db, &logger)
 	variantRepo := postgres.NewVariantRepository(db, &logger)
 	priceRepo := postgres.NewPriceRepository(db, &logger)
+	syncRepo := postgres.NewSyncHashRepository(db, &logger)
 
 	// Initialize services
 	stripeService := stripe.NewStripeService(&logger, &cfg.Stripe)
@@ -113,37 +113,38 @@ func main() {
 	// Initialize handlers
 	productHandler := handler.NewProductHandler(&logger, productService, variantRepo, priceRepo)
 	variantHandler := handler.NewVariantHandler(&logger, variantRepo, productRepo)
-	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus, productRepo, priceRepo, variantRepo)
+	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus, productRepo, priceRepo, variantRepo, syncRepo)
 
 	// Start echo server
 	e := echo.New()
 
 	// middleware
 	e.Use(middleware.RequestID())
-	e.Use(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
-		Skipper: func(c echo.Context) bool {
-			// Get the current request path
-			path := c.Request().URL.Path
+	e.Use(middleware.AddTrailingSlash())
+	// e.Use(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
+	// 	Skipper: func(c echo.Context) bool {
+	// 		// Get the current request path
+	// 		path := c.Request().URL.Path
 
-			// Create patterns for paths that should skip trailing slash
-			skipPatterns := []string{
-				"/api/v1/products/", // This will match /api/v1/products/123
-				"/api/v1/variants/",
-				"/api/v1/subscriptions/",
-				// Add other API path prefixes as needed
-			}
+	// 		// Create patterns for paths that should skip trailing slash
+	// 		skipPatterns := []string{
+	// 			"/api/v1/products/", // This will match /api/v1/products/123
+	// 			"/api/v1/variants/",
+	// 			"/api/v1/subscriptions/",
+	// 			// Add other API path prefixes as needed
+	// 		}
 
-			// Check if the path starts with any of the skip patterns
-			// AND has additional segments (indicating a parameter)
-			for _, pattern := range skipPatterns {
-				if strings.HasPrefix(path, pattern) && len(path) > len(pattern) {
-					return true
-				}
-			}
+	// 		// Check if the path starts with any of the skip patterns
+	// 		// AND has additional segments (indicating a parameter)
+	// 		for _, pattern := range skipPatterns {
+	// 			if strings.HasPrefix(path, pattern) && len(path) > len(pattern) {
+	// 				return true
+	// 			}
+	// 		}
 
-			return false
-		},
-	}))
+	// 		return false
+	// 	},
+	// }))
 
 	e.Use(custommiddleware.RequestLogger(&logger))
 	corsConfig := custommiddleware.CORSConfig{
