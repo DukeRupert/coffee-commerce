@@ -89,3 +89,26 @@ type VariantCreatedPayload struct {
 	// Metadata
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// VariantUpdatedPayload represents the data in a variant.updated event
+type VariantUpdatedPayload struct {
+	// IDs
+	VariantID       string `json:"variant_id"`
+	ProductID       string `json:"product_id"`
+	PriceID         string `json:"price_id"`
+
+	// Stripe IDs
+	StripeProductID string `json:"stripe_product_id"`
+	StripePriceID   string `json:"stripe_price_id"`
+
+	// Price information
+	Amount        int64  `json:"amount"`         // Price amount in cents
+	Currency      string `json:"currency"`       // Currency code (e.g., USD)
+	PriceType     string `json:"price_type"`     // one_time or recurring
+	Interval      string `json:"interval,omitempty"`       // week, month, year (for recurring)
+	IntervalCount int    `json:"interval_count,omitempty"` // Number of intervals (for recurring)
+
+	// Metadata
+	UpdatedAt    time.Time `json:"updated_at"`
+	UpdateSource string    `json:"update_source"` // e.g., "stripe_webhook", "api", "admin"
+}

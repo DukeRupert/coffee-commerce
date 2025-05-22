@@ -262,39 +262,45 @@ func (h *StripeWebhookHandler) handlePriceCreated(event stripe.Event) error {
 		return nil
 	}
 
-	// Find the associated product
-	product, err := h.variantRepo.GetByStripeID(ctx, stripePrice.Product.ID)
+	// Find the variant that corresponds to this Stripe product
+	existingVariant, err := h.variantRepo.GetByStripeProductID(ctx, stripePrice.Product.ID)
 	if err != nil {
 		h.logger.Error().Err(err).
 			Str("stripe_product_id", stripePrice.Product.ID).
-			Msg("Error finding associated product")
+			Msg("Error finding associated variant")
 		return err
 	}
 
-	// If product doesn't exist, we need to fetch it from Stripe and create it
-	if product == nil {
+	// If variant doesn't exist, we need to handle this case
+	if existingVariant == nil {
 		h.logger.Warn().
 			Str("stripe_product_id", stripePrice.Product.ID).
-			Msg("Associated product not found, fetching from Stripe")
+			Str("stripe_price_id", stripePrice.ID).
+			Msg("No variant found for Stripe product - this price belongs to a Stripe product not in our system")
 
-		// This would require implementing a method to fetch the product from Stripe
-		// and create it in our database
-		err = h.fetchAndCreateProduct(stripePrice.Product.ID)
-		if err != nil {
-			h.logger.Error().Err(err).
-				Str("stripe_product_id", stripePrice.Product.ID).
-				Msg("Failed to fetch and create product")
-			return err
-		}
+		// We could try to fetch the Stripe product and create a variant, but for now we'll skip
+		h.logger.Info().
+			Str("stripe_product_id", stripePrice.Product.ID).
+			Str("stripe_price_id", stripePrice.ID).
+			Msg("Skipping price creation - no associated variant found")
+		return nil
+	}
 
-		// Now try to get the product again
-		product, err = h.variantRepo.GetByStripeID(ctx, stripePrice.Product.ID)
-		if err != nil || product == nil {
-			h.logger.Error().Err(err).
-				Str("stripe_product_id", stripePrice.Product.ID).
-				Msg("Still unable to find product after creation attempt")
-			return fmt.Errorf("unable to find or create associated product")
-		}
+	// Get the parent product for the price record
+	parentProduct, err := h.productRepo.GetByID(ctx, existingVariant.ProductID)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("product_id", existingVariant.ProductID.String()).
+			Msg("Error finding parent product for variant")
+		return err
+	}
+
+	if parentProduct == nil {
+		h.logger.Error().
+			Str("product_id", existingVariant.ProductID.String()).
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Parent product not found for variant")
+		return fmt.Errorf("parent product not found for variant %s", existingVariant.ID.String())
 	}
 
 	// Create a new price model
@@ -310,8 +316,8 @@ func (h *StripeWebhookHandler) handlePriceCreated(event stripe.Event) error {
 
 	newPrice := &model.Price{
 		ID:            uuid.New(),
-		ProductID:     product.ID,
-		Name:          getPriceName(stripePrice, product.Name),
+		ProductID:     parentProduct.ID, // Reference the parent product
+		Name:          getPriceName(stripePrice, parentProduct.Name),
 		Amount:        stripePrice.UnitAmount,
 		Currency:      string(stripePrice.Currency),
 		Type:          priceType,
@@ -332,24 +338,56 @@ func (h *StripeWebhookHandler) handlePriceCreated(event stripe.Event) error {
 		return err
 	}
 
-	// Now we need to create a variant for this price
-	// This is somewhat complex as we need to determine the option values
-	// based on the price's metadata or product metadata
-	variant, err := h.createVariantForPrice(ctx, newPrice, product, stripePrice)
+	// Update the variant to reference this new price
+	existingVariant.PriceID = newPrice.ID
+	existingVariant.StripePriceID = stripePrice.ID
+	existingVariant.UpdatedAt = time.Now()
+
+	err = h.variantRepo.Update(ctx, existingVariant)
 	if err != nil {
 		h.logger.Error().Err(err).
+			Str("variant_id", existingVariant.ID.String()).
 			Str("price_id", newPrice.ID.String()).
-			Msg("Failed to create variant for price")
+			Msg("Failed to update variant with new price")
 		// Continue anyway since the price was created
+	} else {
+		h.logger.Info().
+			Str("variant_id", existingVariant.ID.String()).
+			Str("price_id", newPrice.ID.String()).
+			Msg("Updated variant with new price")
+	}
+
+	// Publish variant updated event (since the variant now has a new price)
+	variantUpdatedPayload := events.VariantUpdatedPayload{
+		VariantID:       existingVariant.ID.String(),
+		ProductID:       parentProduct.ID.String(),
+		PriceID:         newPrice.ID.String(),
+		StripeProductID: existingVariant.StripeProductID,
+		StripePriceID:   newPrice.StripeID,
+		Amount:          newPrice.Amount,
+		Currency:        newPrice.Currency,
+		PriceType:       newPrice.Type,
+		Interval:        newPrice.Interval,
+		IntervalCount:   newPrice.IntervalCount,
+		UpdatedAt:       time.Now(),
+		UpdateSource:    "stripe_webhook",
+	}
+
+	err = h.eventBus.Publish(events.TopicVariantUpdated, variantUpdatedPayload)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Failed to publish variant updated event")
+		// Don't return error since the price and variant were updated successfully
 	}
 
 	// Log success
 	h.logger.Info().
 		Str("stripe_price_id", stripePrice.ID).
 		Str("price_id", newPrice.ID.String()).
-		Str("product_id", product.ID.String()).
-		Interface("variant", variant != nil).
-		Msg("Successfully created price from Stripe webhook")
+		Str("variant_id", existingVariant.ID.String()).
+		Str("product_id", parentProduct.ID.String()).
+		Msg("Successfully created price and updated variant from Stripe webhook")
 
 	return nil
 }
@@ -707,6 +745,7 @@ func getFirstImage(images []string) string {
 }
 
 // handleProductDeleted processes a product.deleted webhook event
+// Note: In our system, Stripe "products" map to variants, not products
 func (h *StripeWebhookHandler) handleProductDeleted(event stripe.Event) error {
 	// Parse the webhook payload
 	var stripeProduct stripe.Product
@@ -720,59 +759,84 @@ func (h *StripeWebhookHandler) handleProductDeleted(event stripe.Event) error {
 		Str("stripe_product_id", stripeProduct.ID).
 		Msg("Processing Stripe product.deleted event")
 
-	// Find the product in our database
+	// Find the variant in our database by Stripe product ID
 	ctx := context.Background()
-	existingProduct, err := h.variantRepo.GetByStripeID(ctx, stripeProduct.ID)
+
+	// First, we need to find all variants and filter by StripeProductID
+	// since we don't have a direct GetByStripeProductID method
+	existingVariant, err := h.variantRepo.GetByStripeProductID(ctx, stripeProduct.ID)
 	if err != nil {
 		h.logger.Error().Err(err).
 			Str("stripe_product_id", stripeProduct.ID).
-			Msg("Error checking for existing product")
+			Msg("Error checking for existing variant")
 		return err
 	}
 
-	// If product doesn't exist, nothing to do
-	if existingProduct == nil {
+	// If variant doesn't exist, nothing to do
+	if existingVariant == nil {
 		h.logger.Info().
 			Str("stripe_product_id", stripeProduct.ID).
-			Msg("Product not found in database, nothing to delete")
+			Msg("Variant not found in database, nothing to delete")
 		return nil
 	}
 
-	// For safety, we don't actually delete the product, we archive it
-	err = h.productRepo.Archive(ctx, existingProduct.ID)
+	// Get the parent product for logging and event publishing
+	parentProduct, err := h.productRepo.GetByID(ctx, existingVariant.ProductID)
+	if err != nil {
+		h.logger.Warn().Err(err).
+			Str("product_id", existingVariant.ProductID.String()).
+			Msg("Could not retrieve parent product, continuing with variant deletion")
+		// Continue anyway - we can still delete the variant
+	}
+
+	// For safety, we don't actually delete the variant, we deactivate it
+	existingVariant.Active = false
+	existingVariant.UpdatedAt = time.Now()
+
+	err = h.variantRepo.Update(ctx, existingVariant)
 	if err != nil {
 		h.logger.Error().Err(err).
 			Str("stripe_product_id", stripeProduct.ID).
-			Str("product_id", existingProduct.ID.String()).
-			Msg("Failed to archive product in database")
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Failed to deactivate variant in database")
 		return err
 	}
 
-	// Publish product deleted event
+	// Publish variant deleted event
 	payload := map[string]interface{}{
-		"product_id":    existingProduct.ID.String(),
-		"stripe_id":     existingProduct.StripeID,
-		"deleted_at":    time.Now(),
-		"delete_source": "stripe_webhook",
+		"variant_id":        existingVariant.ID.String(),
+		"product_id":        existingVariant.ProductID.String(),
+		"stripe_product_id": stripeProduct.ID,
+		"stripe_price_id":   existingVariant.StripePriceID,
+		"deleted_at":        time.Now(),
+		"delete_source":     "stripe_webhook",
 	}
 
-	err = h.eventBus.Publish(events.TopicProductDeleted, payload)
+	// Include parent product info if available
+	if parentProduct != nil {
+		payload["product_name"] = parentProduct.Name
+	}
+
+	err = h.eventBus.Publish(events.TopicVariantDeleted, payload)
 	if err != nil {
 		h.logger.Error().Err(err).
-			Str("product_id", existingProduct.ID.String()).
-			Msg("Failed to publish product deleted event")
-		// Don't return error since product is already archived
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Failed to publish variant deleted event")
+		// Don't return error since variant is already deactivated
 	}
 
 	h.logger.Info().
 		Str("stripe_product_id", stripeProduct.ID).
-		Str("product_id", existingProduct.ID.String()).
-		Msg("Successfully archived product from Stripe webhook")
+		Str("variant_id", existingVariant.ID.String()).
+		Str("product_id", existingVariant.ProductID.String()).
+		Msg("Successfully deactivated variant from Stripe webhook")
 
 	return nil
 }
 
 // handleProductUpdated processes a product.updated webhook event
+// handleProductUpdated processes a product.updated webhook event
+// Note: In our system, Stripe "products" map to variants, not products
 func (h *StripeWebhookHandler) handleProductUpdated(event stripe.Event) error {
 	// Parse the webhook payload
 	var stripeProduct stripe.Product
@@ -787,103 +851,151 @@ func (h *StripeWebhookHandler) handleProductUpdated(event stripe.Event) error {
 		Str("name", stripeProduct.Name).
 		Msg("Processing Stripe product.updated event")
 
-	// Find the product in our database
+	// Find the variant in our database by Stripe product ID
 	ctx := context.Background()
-	existingProduct, err := h.variantRepo.GetByStripeID(ctx, stripeProduct.ID)
+	existingVariant, err := h.variantRepo.GetByStripeProductID(ctx, stripeProduct.ID)
 	if err != nil {
 		h.logger.Error().Err(err).
 			Str("stripe_product_id", stripeProduct.ID).
-			Msg("Error checking for existing product")
+			Msg("Error checking for existing variant")
 		return err
 	}
 
-	// If product doesn't exist, create it
-	if existingProduct == nil {
+	// If variant doesn't exist, create it
+	if existingVariant == nil {
 		h.logger.Warn().
 			Str("stripe_product_id", stripeProduct.ID).
-			Msg("Product not found in database, handling as creation instead")
+			Msg("Variant not found in database, handling as creation instead")
 		return h.handleProductCreated(event)
 	}
 
-	// Update the product with new values
-	existingProduct.Name = stripeProduct.Name
-	existingProduct.Description = stripeProduct.Description
-	existingProduct.Active = stripeProduct.Active
-	existingProduct.UpdatedAt = time.Now()
-
-	// Update image if available
-	if len(stripeProduct.Images) > 0 {
-		existingProduct.ImageURL = stripeProduct.Images[0]
-	}
-
-	// Update metadata fields if present
-	if stripeProduct.Metadata != nil {
-		if val, ok := stripeProduct.Metadata["origin"]; ok {
-			existingProduct.Origin = val
-		}
-		if val, ok := stripeProduct.Metadata["roast_level"]; ok {
-			existingProduct.RoastLevel = val
-		}
-		if val, ok := stripeProduct.Metadata["flavor_notes"]; ok {
-			existingProduct.FlavorNotes = val
-		}
-		if val, ok := stripeProduct.Metadata["weight"]; ok {
-			if w, err := strconv.Atoi(val); err == nil {
-				existingProduct.Weight = w
-			}
-		}
-		if val, ok := stripeProduct.Metadata["allow_subscription"]; ok {
-			existingProduct.AllowSubscription = val == "true"
-		}
-
-		// Update options if present
-		// This is a bit more complex as we need to handle option removals
-		newOptions := make(map[string][]string)
-		for key, val := range stripeProduct.Metadata {
-			if strings.HasPrefix(key, "option_") {
-				optionKey := strings.TrimPrefix(key, "option_")
-				optionValues := strings.Split(val, ",")
-				newOptions[optionKey] = optionValues
-			}
-		}
-
-		// Only update options if we found some in the metadata
-		if len(newOptions) > 0 {
-			existingProduct.Options = newOptions
-		}
-	}
-
-	// Save the updated product
-	err = h.productRepo.Update(ctx, existingProduct)
+	// Get the parent product for reference
+	parentProduct, err := h.productRepo.GetByID(ctx, existingVariant.ProductID)
 	if err != nil {
 		h.logger.Error().Err(err).
-			Str("stripe_product_id", stripeProduct.ID).
-			Str("product_id", existingProduct.ID.String()).
-			Msg("Failed to update product in database")
+			Str("product_id", existingVariant.ProductID.String()).
+			Msg("Error retrieving parent product")
 		return err
 	}
 
-	// Publish product updated event
-	payload := map[string]interface{}{
-		"product_id":    existingProduct.ID.String(),
-		"stripe_id":     existingProduct.StripeID,
-		"name":          existingProduct.Name,
-		"updated_at":    existingProduct.UpdatedAt,
-		"update_source": "stripe_webhook",
+	if parentProduct == nil {
+		h.logger.Error().
+			Str("product_id", existingVariant.ProductID.String()).
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Parent product not found for variant")
+		return fmt.Errorf("parent product not found for variant %s", existingVariant.ID.String())
 	}
 
-	err = h.eventBus.Publish(events.TopicProductUpdated, payload)
+	// Track what fields are being updated for logging
+	updatedFields := []string{}
+
+	// Update the variant with new values from Stripe product metadata
+	existingVariant.Active = stripeProduct.Active
+	existingVariant.UpdatedAt = time.Now()
+	updatedFields = append(updatedFields, "active")
+
+	// Update variant-specific fields from metadata
+	if stripeProduct.Metadata != nil {
+		// Update weight if present
+		if val, ok := stripeProduct.Metadata["weight"]; ok {
+			weight := convertWeightToGrams(val)
+			if weight > 0 && weight != existingVariant.Weight {
+				existingVariant.Weight = weight
+				updatedFields = append(updatedFields, "weight")
+			}
+		}
+
+		// Update variant options from metadata
+		newOptions := make(map[string]string)
+		optionsUpdated := false
+		
+		for key, val := range stripeProduct.Metadata {
+			// Look for option fields (not prefixed with "option_" since these are variant-specific)
+			if key == "weight" || key == "grind" || strings.HasPrefix(key, "variant_") {
+				optionKey := key
+				if strings.HasPrefix(key, "variant_") {
+					optionKey = strings.TrimPrefix(key, "variant_")
+				}
+				
+				// Only update if the value has changed
+				if existingValue, exists := existingVariant.Options[optionKey]; !exists || existingValue != val {
+					newOptions[optionKey] = val
+					optionsUpdated = true
+				} else {
+					newOptions[optionKey] = existingValue // Keep existing value
+				}
+			}
+		}
+
+		// Preserve existing options that aren't being updated
+		for key, val := range existingVariant.Options {
+			if _, exists := newOptions[key]; !exists {
+				newOptions[key] = val
+			}
+		}
+
+		// Update options if any changed
+		if optionsUpdated {
+			existingVariant.Options = newOptions
+			updatedFields = append(updatedFields, "options")
+		}
+
+		// Update stock level if present
+		if val, ok := stripeProduct.Metadata["stock_level"]; ok {
+			if stockLevel, err := strconv.Atoi(val); err == nil && stockLevel != existingVariant.StockLevel {
+				existingVariant.StockLevel = stockLevel
+				updatedFields = append(updatedFields, "stock_level")
+			}
+		}
+	}
+
+	// Save the updated variant
+	err = h.variantRepo.Update(ctx, existingVariant)
 	if err != nil {
 		h.logger.Error().Err(err).
-			Str("product_id", existingProduct.ID.String()).
-			Msg("Failed to publish product updated event")
-		// Don't return error since product is already updated
+			Str("stripe_product_id", stripeProduct.ID).
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Failed to update variant in database")
+		return err
+	}
+
+	// Publish variant updated event
+	variantUpdatedPayload := events.VariantUpdatedPayload{
+		VariantID:       existingVariant.ID.String(),
+		ProductID:       parentProduct.ID.String(),
+		PriceID:         existingVariant.PriceID.String(),
+		StripeProductID: existingVariant.StripeProductID,
+		StripePriceID:   existingVariant.StripePriceID,
+		UpdatedAt:       existingVariant.UpdatedAt,
+		UpdateSource:    "stripe_webhook",
+	}
+
+	// Get price information for the payload if available
+	if existingVariant.PriceID != uuid.Nil {
+		price, err := h.priceRepo.GetByID(ctx, existingVariant.PriceID)
+		if err == nil && price != nil {
+			variantUpdatedPayload.Amount = price.Amount
+			variantUpdatedPayload.Currency = price.Currency
+			variantUpdatedPayload.PriceType = price.Type
+			variantUpdatedPayload.Interval = price.Interval
+			variantUpdatedPayload.IntervalCount = price.IntervalCount
+		}
+	}
+
+	err = h.eventBus.Publish(events.TopicVariantUpdated, variantUpdatedPayload)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("variant_id", existingVariant.ID.String()).
+			Msg("Failed to publish variant updated event")
+		// Don't return error since variant is already updated
 	}
 
 	h.logger.Info().
 		Str("stripe_product_id", stripeProduct.ID).
-		Str("product_id", existingProduct.ID.String()).
-		Msg("Successfully updated product from Stripe webhook")
+		Str("variant_id", existingVariant.ID.String()).
+		Str("product_id", parentProduct.ID.String()).
+		Strs("updated_fields", updatedFields).
+		Msg("Successfully updated variant from Stripe webhook")
 
 	return nil
 }

@@ -11,6 +11,7 @@ type ProductRepository interface {
 	Create(ctx context.Context, product *model.Product) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Product, error)
 	GetByName(ctx context.Context, name string) (*model.Product, error)
+	GetByStripeID(ctx context.Context, stripeID string) (*model.Product, error)
 	// List retrieves all products, with optional filtering
 	List(ctx context.Context, offset, limit int, includeInactive, includeArchived bool) ([]*model.Product, int, error)
 	Update(ctx context.Context, product *model.Product) error
@@ -28,7 +29,9 @@ type VariantRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Variant, error)
 
 	// GetByStripeID retrieves a variant by its StripeProductID
-	GetByStripeID(ctx context.Context, stripeID string) (*model.Product, error)
+	GetByStripeID(ctx context.Context, stripeID string) (*model.Variant, error)
+
+	GetByStripeProductID(ctx context.Context, stripeProductID string) (*model.Variant, error)
 
 	// GetByProductID retrieves all variants for a product
 	GetByProductID(ctx context.Context, productID uuid.UUID) ([]*model.Variant, error)

@@ -14,6 +14,8 @@ const (
 const (
 	TopicVariantCreated = "variants.created"
 	TopicVariantQueued  = "variants.queued" // Event when a variant needs to be created
+	TopicVariantUpdated = "variants.updated"
+	TopicVariantDeleted = "variants.deleted"
 )
 
 // Customer-related topics

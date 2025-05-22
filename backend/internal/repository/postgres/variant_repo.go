@@ -228,6 +228,52 @@ func (r *variantRepository) GetByProductID(ctx context.Context, productID uuid.U
 	return variants, nil
 }
 
+// GetByStripeProductID retrieves a variant by its Stripe product ID
+func (r *variantRepository) GetByStripeProductID(ctx context.Context, stripeProductID string) (*model.Variant, error) {
+	query := `
+        SELECT
+            id, product_id, price_id, stripe_product_id, stripe_price_id, weight,
+            options, active, stock_level, created_at, updated_at
+        FROM variants
+        WHERE stripe_product_id = $1
+    `
+
+	var variant model.Variant
+	var optionsJSON []byte
+
+	err := r.db.QueryRowContext(ctx, query, stripeProductID).Scan(
+		&variant.ID,
+		&variant.ProductID,
+		&variant.PriceID,
+		&variant.StripeProductID,
+		&variant.StripePriceID,
+		&variant.Weight,
+		&optionsJSON,
+		&variant.Active,
+		&variant.StockLevel,
+		&variant.CreatedAt,
+		&variant.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // Variant not found
+		}
+		return nil, fmt.Errorf("failed to get variant by Stripe product ID: %w", err)
+	}
+
+	// Unmarshal the options JSON
+	if len(optionsJSON) > 0 {
+		if err := json.Unmarshal(optionsJSON, &variant.Options); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal options: %w", err)
+		}
+	} else {
+		variant.Options = make(map[string]string)
+	}
+
+	return &variant, nil
+}
+
 // Update updates an existing variant
 func (r *variantRepository) Update(ctx context.Context, variant *model.Variant) error {
 	variant.UpdatedAt = time.Now()
