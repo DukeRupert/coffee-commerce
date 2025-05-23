@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/dukerupert/coffee-commerce/config"
 	"github.com/dukerupert/coffee-commerce/internal/api/handler"
@@ -106,6 +105,7 @@ func main() {
 	// Initialize services
 	stripeService := stripe.NewStripeService(&logger, &cfg.Stripe)
 	productService := service.NewProductService(&logger, eventBus, productRepo)
+	priceService := service.NewPriceService(&logger, eventBus, priceRepo, productRepo, variantRepo, stripeService)
 	_, err = service.NewVariantService(&logger, eventBus, variantRepo, productRepo, priceRepo, stripeService)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize variant service")
@@ -114,36 +114,14 @@ func main() {
 	// Initialize handlers
 	productHandler := handler.NewProductHandler(&logger, productService, variantRepo, priceRepo)
 	variantHandler := handler.NewVariantHandler(&logger, variantRepo, productRepo)
+	priceHandler := handler.NewPriceHandler(&logger, priceService, productRepo, variantRepo)
 	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus, productRepo, priceRepo, variantRepo, syncRepo)
+	adminHandler := handler.NewAdminHandler(&logger, priceService, productRepo)
 
 	// Start echo server
 	e := echo.New()
 
 	// middleware
-	e.Pre(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
-		Skipper: func(c echo.Context) bool {
-			// Get the current request path
-			path := c.Request().URL.Path
-
-			// Create patterns for paths that should skip trailing slash
-			skipPatterns := []string{
-				"/api/v1/products/", // This will match /api/v1/products/123
-				"/api/v1/variants/",
-				"/api/v1/subscriptions/",
-				// Add other API path prefixes as needed
-			}
-
-			// Check if the path starts with any of the skip patterns
-			// AND has additional segments (indicating a parameter)
-			for _, pattern := range skipPatterns {
-				if strings.HasPrefix(path, pattern) && len(path) > len(pattern) {
-					return true
-				}
-			}
-
-			return false
-		},
-	}))
 	e.Use(middleware.RequestID())
 	e.Use(custommiddleware.RequestLogger(&logger))
 	corsConfig := custommiddleware.CORSConfig{
@@ -161,14 +139,35 @@ func main() {
 	api := e.Group("/api")
 	v1 := api.Group("/v1")
 	v1.POST("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
+
+	// Existing routes
 	products := v1.Group("/products")
-	products.GET("/", productHandler.List)
-	products.POST("/", productHandler.Create)
+	products.GET("", productHandler.List)
+	products.POST("", productHandler.Create)
 	products.GET("/:id", productHandler.Get)
-	products.PUT("/:id", productHandler.Update)
 	products.DELETE("/:id", productHandler.Delete)
 	products.GET("/:id/variants", variantHandler.ListByProduct)
 	products.POST("/:id/archive", productHandler.Archive)
+
+	// Add product prices route
+	products.GET("/:id/prices", priceHandler.GetByProduct)
+
+	// Add price routes
+	prices := v1.Group("/prices")
+	prices.POST("", priceHandler.Create)
+	prices.GET("/:id", priceHandler.Get)
+	prices.PUT("/:id", priceHandler.Update)
+	prices.DELETE("/:id", priceHandler.Delete)
+	prices.GET("/:id/variants", priceHandler.GetVariantsByPrice)
+
+	// Add variant price assignment route
+	variants := v1.Group("/variants")
+	variants.POST("/:id/assign-price", priceHandler.AssignToVariant)
+
+	// Admin routes (add these)
+	admin := v1.Group("/admin")
+	admin.GET("/health", adminHandler.HealthCheck)
+	admin.POST("/sync-stripe-ids", adminHandler.SyncStripeProductIDs)
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")

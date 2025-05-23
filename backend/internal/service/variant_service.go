@@ -15,7 +15,6 @@ import (
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
 	events "github.com/dukerupert/coffee-commerce/internal/event"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
-	"github.com/dukerupert/coffee-commerce/internal/stripe"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	stripeSDK "github.com/stripe/stripe-go/v82"
@@ -28,11 +27,11 @@ type variantService struct {
 	variantRepo   interfaces.VariantRepository
 	productRepo   interfaces.ProductRepository
 	priceRepo     interfaces.PriceRepository
-	stripeService *stripe.Service
+	stripeService interfaces.StripeService
 }
 
 // NewVariantService creates a new variant service and subscribes to relevant events
-func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variantRepo interfaces.VariantRepository, productRepo interfaces.ProductRepository, priceRepo interfaces.PriceRepository, stripeService *stripe.Service) (interfaces.VariantService, error) {
+func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variantRepo interfaces.VariantRepository, productRepo interfaces.ProductRepository, priceRepo interfaces.PriceRepository, stripeService interfaces.StripeService) (interfaces.VariantService, error) {
 	subLogger := logger.With().Str("component", "variant_service").Logger()
 
 	s := &variantService{

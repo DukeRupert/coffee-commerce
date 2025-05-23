@@ -4,8 +4,10 @@ package stripe
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/dukerupert/coffee-commerce/config"
+    "github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/rs/zerolog"
 	stripe "github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/price"
@@ -18,14 +20,14 @@ var (
 )
 
 // Service handles communication with the Stripe API
-type Service struct {
+type service struct {
 	logger     zerolog.Logger
 	config     *config.StripeConfig
 	isDisabled bool
 }
 
 // NewStripeService creates a new Stripe service
-func NewStripeService(logger *zerolog.Logger, cfg *config.StripeConfig) *Service {
+func NewStripeService(logger *zerolog.Logger, cfg *config.StripeConfig) interfaces.StripeService {
 	subLogger := logger.With().Str("component", "stripe_service").Logger()
 	
 	// Check if Stripe is properly configured
@@ -37,7 +39,7 @@ func NewStripeService(logger *zerolog.Logger, cfg *config.StripeConfig) *Service
 		InitStripe(cfg, &subLogger)
 	}
 	
-	return &Service{
+	return &service{
 		logger:     subLogger,
 		config:     cfg,
 		isDisabled: isDisabled,
@@ -45,7 +47,7 @@ func NewStripeService(logger *zerolog.Logger, cfg *config.StripeConfig) *Service
 }
 
 // CreateProduct creates a new product in Stripe
-func (s *Service) CreateProduct(name, description string, imageURLs []string, metadata map[string]string) (*stripe.Product, error) {
+func (s *service) CreateProduct(name, description string, imageURLs []string, metadata map[string]string) (*stripe.Product, error) {
     if s.isDisabled {
         s.logger.Warn().Msg("Stripe is disabled, returning mock product")
         return &stripe.Product{
@@ -101,7 +103,7 @@ func (s *Service) CreateProduct(name, description string, imageURLs []string, me
 }
 
 // CreatePrice creates a new price in Stripe
-func (s *Service) CreatePrice(productID string, unitAmount int64, currency string, recurring bool, 
+func (s *service) CreatePrice(productID string, unitAmount int64, currency string, recurring bool, 
     interval string, intervalCount int64) (*stripe.Price, error) {
     
     if s.isDisabled {
@@ -156,7 +158,7 @@ func (s *Service) CreatePrice(productID string, unitAmount int64, currency strin
 }
 
 // GetProduct retrieves a product from Stripe by ID
-func (s *Service) GetProduct(productID string) (*stripe.Product, error) {
+func (s *service) GetProduct(productID string) (*stripe.Product, error) {
 	if s.isDisabled {
 		s.logger.Warn().Msg("Stripe is disabled, returning mock product")
 		return &stripe.Product{
@@ -174,4 +176,103 @@ func (s *Service) GetProduct(productID string) (*stripe.Product, error) {
 	}
 	
 	return p, nil
+}
+
+// ListAllProducts retrieves all products from Stripe
+func (s *service) ListAllProducts() ([]*stripe.Product, error) {
+	if s.isDisabled {
+		s.logger.Warn().Msg("Stripe is disabled, returning empty product list")
+		return []*stripe.Product{}, nil
+	}
+
+	s.logger.Debug().Msg("Listing all Stripe products")
+
+	var allProducts []*stripe.Product
+	params := &stripe.ProductListParams{}
+	params.Filters.AddFilter("limit", "", "100") // Get up to 100 products per request
+
+	iter := product.List(params)
+	for iter.Next() {
+		prod := iter.Product()
+		allProducts = append(allProducts, prod)
+	}
+
+	if err := iter.Err(); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to list Stripe products")
+		return nil, fmt.Errorf("failed to list Stripe products: %w", err)
+	}
+
+	s.logger.Info().
+		Int("product_count", len(allProducts)).
+		Msg("Successfully retrieved Stripe products")
+
+	return allProducts, nil
+}
+
+// FindProductByName searches for a Stripe product by name (case-insensitive)
+func (s *service) FindProductByName(name string) (*stripe.Product, error) {
+	if s.isDisabled {
+		s.logger.Warn().Msg("Stripe is disabled, cannot search for product")
+		return nil, nil
+	}
+
+	products, err := s.ListAllProducts()
+	if err != nil {
+		return nil, err
+	}
+
+	// Search for product by name (case-insensitive)
+	targetName := strings.ToLower(strings.TrimSpace(name))
+	
+	for _, prod := range products {
+		if strings.ToLower(strings.TrimSpace(prod.Name)) == targetName {
+			s.logger.Debug().
+				Str("search_name", name).
+				Str("found_stripe_id", prod.ID).
+				Str("found_name", prod.Name).
+				Msg("Found Stripe product by name")
+			return prod, nil
+		}
+	}
+
+	s.logger.Debug().
+		Str("search_name", name).
+		Msg("No Stripe product found with matching name")
+	
+	return nil, nil
+}
+
+// FindProductByMetadata searches for a Stripe product by metadata field
+func (s *service) FindProductByMetadata(key, value string) (*stripe.Product, error) {
+	if s.isDisabled {
+		s.logger.Warn().Msg("Stripe is disabled, cannot search for product")
+		return nil, nil
+	}
+
+	products, err := s.ListAllProducts()
+	if err != nil {
+		return nil, err
+	}
+
+	// Search for product by metadata
+	for _, prod := range products {
+		if prod.Metadata != nil {
+			if metaValue, exists := prod.Metadata[key]; exists && metaValue == value {
+				s.logger.Debug().
+					Str("search_key", key).
+					Str("search_value", value).
+					Str("found_stripe_id", prod.ID).
+					Str("found_name", prod.Name).
+					Msg("Found Stripe product by metadata")
+				return prod, nil
+			}
+		}
+	}
+
+	s.logger.Debug().
+		Str("search_key", key).
+		Str("search_value", value).
+		Msg("No Stripe product found with matching metadata")
+	
+	return nil, nil
 }
