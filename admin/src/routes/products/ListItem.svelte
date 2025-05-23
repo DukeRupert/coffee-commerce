@@ -110,7 +110,7 @@
 	</td>
 	<td class="relative py-4 pr-4 pl-3 text-right text-sm font-medium whitespace-nowrap sm:pr-0">
 		<a
-			href={`/products/${product.id}/edit`}
+			href={`/products/${product.id}`}
 			class="flex items-center justify-end text-indigo-600 hover:text-indigo-900"
 		>
 			<Edit size={16} class="mr-1" />

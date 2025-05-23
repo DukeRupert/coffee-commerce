@@ -1,5 +1,5 @@
 // CoffeeServiceClient.ts
-import type { CreateProductRequest } from "./interface";
+import type { CreateProductRequest, ProductWithVariants } from "./interface";
 import { ApiError, type ApiErrorResponse } from "./error";
 
 /**
@@ -248,7 +248,7 @@ export class CoffeeServiceClient {
   public async getProducts(
     params?: GetProductsParams
   ): Promise<PaginatedResponse<Product>> {
-    const url = this.createUrl('/products/', params);
+    const url = this.createUrl('/products', params);
 
     try {
       const response = await this.fetchImpl(url, {
@@ -298,30 +298,6 @@ export class CoffeeServiceClient {
         status: 500,
         message: 'An unknown error occurred'
       });
-    }
-  }
-
-  /**
-   * Get a single product by ID
-   * @param productId ID of the product to retrieve
-   * @returns Promise with the product data
-   */
-  public async getProduct(productId: string): Promise<Product> {
-    const url = this.createUrl(`/products/${productId}/`);
-
-    try {
-      const response = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: this.getHeaders(),
-        signal: AbortSignal.timeout(this.timeout),
-      });
-
-      return this.handleResponse<Product>(response);
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to fetch product: ${error.message}`);
-      }
-      throw error;
     }
   }
 
@@ -432,7 +408,33 @@ export class CoffeeServiceClient {
       sort_dir: params.sort_dir as ('asc' | 'desc') | undefined,
     };
   }
+
+  /**
+ * Get a single product by ID with variants
+ * @param productId ID of the product to retrieve
+ * @returns Promise with the product data including variants
+ */
+public async getProduct(productId: string): Promise<ProductWithVariants> {
+  const url = this.createUrl(`/products/${productId}`);
+
+  try {
+    const response = await this.fetchImpl(url, {
+      method: 'GET',
+      headers: this.getHeaders(),
+      signal: AbortSignal.timeout(this.timeout),
+    });
+
+    return this.handleResponse<ProductWithVariants>(response);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to fetch product: ${error.message}`);
+    }
+    throw error;
+  }
 }
+}
+
+
 
 /**
  * Create a new Coffee Service API client
