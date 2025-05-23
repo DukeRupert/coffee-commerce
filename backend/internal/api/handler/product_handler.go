@@ -331,8 +331,134 @@ func (h *productHandler) List(c echo.Context) error {
 
 // Update handles PUT /api/products/:id
 func (h *productHandler) Update(c echo.Context) error {
-	h.logger.Info().Str("handler", "ProductHandler.Update").Msg("Handling product update by ID request")
-	return c.String(http.StatusOK, "Hello, World!")
+	ctx := c.Request().Context()
+	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
+
+	// 1. Parse ID from URL
+	idParam := c.Param("id")
+
+	h.logger.Info().
+		Str("handler", "ProductHandler.Update").
+		Str("request_id", requestID).
+		Str("method", c.Request().Method).
+		Str("path", c.Request().URL.Path).
+		Str("remote_addr", c.Request().RemoteAddr).
+		Str("id_param", idParam).
+		Msg("Handling product update by ID request")
+
+	// Convert string ID to UUID
+	productID, err := uuid.Parse(idParam)
+	if err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("request_id", requestID).
+			Str("id_param", idParam).
+			Msg("Invalid product ID format")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  http.StatusBadRequest,
+			Message: "Invalid product ID format",
+			Code:    "INVALID_ID_FORMAT",
+		})
+	}
+
+	// 2. Parse the request body
+	var productUpdateDTO dto.ProductUpdateDTO
+	if err := c.Bind(&productUpdateDTO); err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("request_id", requestID).
+			Msg("Failed to parse request body")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  http.StatusBadRequest,
+			Message: "Invalid request format",
+			Code:    "INVALID_FORMAT",
+		})
+	}
+
+	// 3. Validate the DTO
+	validationErrors := productUpdateDTO.Valid(ctx)
+	if len(validationErrors) > 0 {
+		h.logger.Warn().
+			Interface("validation_errors", validationErrors).
+			Str("request_id", requestID).
+			Msg("Product update validation failed")
+
+		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:           http.StatusBadRequest,
+			Message:          "Validation failed",
+			ValidationErrors: validationErrors,
+			Code:             "VALIDATION_ERROR",
+		})
+	}
+
+	// 4. Call product service to update the product
+	updatedProduct, err := h.productService.Update(ctx, productID, &productUpdateDTO)
+	if err != nil {
+		h.logger.Error().
+			Err(err).
+			Str("request_id", requestID).
+			Str("product_id", productID.String()).
+			Msg("Failed to update product")
+
+		// Handle specific error types
+		switch {
+		case errors.Is(err, postgres.ErrResourceNotFound):
+			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+				Status:  http.StatusNotFound,
+				Message: "Product not found",
+				Code:    "PRODUCT_NOT_FOUND",
+			})
+
+		case errors.Is(err, postgres.ErrDuplicateName):
+			return c.JSON(http.StatusConflict, api.ErrorResponse{
+				Status:  http.StatusConflict,
+				Message: "A product with this name already exists",
+				Code:    "DUPLICATE_PRODUCT",
+				ValidationErrors: map[string]string{
+					"name": "This product name is already in use",
+				},
+			})
+
+		case errors.Is(err, service.ErrInsufficientPermissions):
+			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+				Status:  http.StatusForbidden,
+				Message: "You don't have permission to update this product",
+				Code:    "FORBIDDEN",
+			})
+
+		case errors.Is(err, postgres.ErrDatabaseConnection):
+			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+				Status:  http.StatusServiceUnavailable,
+				Message: "Service temporarily unavailable, please try again later",
+				Code:    "SERVICE_UNAVAILABLE",
+			})
+
+		default:
+			// Generic server error
+			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  http.StatusInternalServerError,
+				Message: "Failed to update product",
+				Code:    "INTERNAL_ERROR",
+			})
+		}
+	}
+
+	// 5. Convert to response DTO
+	productResponse := dto.ProductResponseDTOFromModel(updatedProduct)
+
+	// 6. Return success response
+	h.logger.Info().
+		Str("request_id", requestID).
+		Str("product_id", productID.String()).
+		Str("product_name", updatedProduct.Name).
+		Msg("Product updated successfully")
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Product updated successfully",
+		"product": productResponse,
+	})
 }
 
 // Archive handles POST /api/products/:id/archive

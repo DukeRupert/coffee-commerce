@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/dukerupert/coffee-commerce/config"
 	"github.com/dukerupert/coffee-commerce/internal/api/handler"
@@ -119,33 +120,31 @@ func main() {
 	e := echo.New()
 
 	// middleware
+	e.Pre(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
+		Skipper: func(c echo.Context) bool {
+			// Get the current request path
+			path := c.Request().URL.Path
+
+			// Create patterns for paths that should skip trailing slash
+			skipPatterns := []string{
+				"/api/v1/products/", // This will match /api/v1/products/123
+				"/api/v1/variants/",
+				"/api/v1/subscriptions/",
+				// Add other API path prefixes as needed
+			}
+
+			// Check if the path starts with any of the skip patterns
+			// AND has additional segments (indicating a parameter)
+			for _, pattern := range skipPatterns {
+				if strings.HasPrefix(path, pattern) && len(path) > len(pattern) {
+					return true
+				}
+			}
+
+			return false
+		},
+	}))
 	e.Use(middleware.RequestID())
-	e.Use(middleware.AddTrailingSlash())
-	// e.Use(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
-	// 	Skipper: func(c echo.Context) bool {
-	// 		// Get the current request path
-	// 		path := c.Request().URL.Path
-
-	// 		// Create patterns for paths that should skip trailing slash
-	// 		skipPatterns := []string{
-	// 			"/api/v1/products/", // This will match /api/v1/products/123
-	// 			"/api/v1/variants/",
-	// 			"/api/v1/subscriptions/",
-	// 			// Add other API path prefixes as needed
-	// 		}
-
-	// 		// Check if the path starts with any of the skip patterns
-	// 		// AND has additional segments (indicating a parameter)
-	// 		for _, pattern := range skipPatterns {
-	// 			if strings.HasPrefix(path, pattern) && len(path) > len(pattern) {
-	// 				return true
-	// 			}
-	// 		}
-
-	// 		return false
-	// 	},
-	// }))
-
 	e.Use(custommiddleware.RequestLogger(&logger))
 	corsConfig := custommiddleware.CORSConfig{
 		AllowOrigins: []string{
@@ -166,6 +165,7 @@ func main() {
 	products.GET("/", productHandler.List)
 	products.POST("/", productHandler.Create)
 	products.GET("/:id", productHandler.Get)
+	products.PUT("/:id", productHandler.Update)
 	products.DELETE("/:id", productHandler.Delete)
 	products.GET("/:id/variants", variantHandler.ListByProduct)
 	products.POST("/:id/archive", productHandler.Archive)

@@ -159,6 +159,137 @@ func (s *productService) GetByID(ctx context.Context, id uuid.UUID) (*model.Prod
 	return product, nil
 }
 
+// Update updates an existing product
+func (s *productService) Update(ctx context.Context, id uuid.UUID, dto *dto.ProductUpdateDTO) (*model.Product, error) {
+	s.logger.Info().
+		Str("product_id", id.String()).
+		Msg("Updating product")
+
+	// First, get the existing product
+	existingProduct, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to retrieve product for update")
+		return nil, fmt.Errorf("failed to retrieve product: %w", err)
+	}
+
+	if existingProduct == nil {
+		s.logger.Warn().
+			Str("product_id", id.String()).
+			Msg("Product not found for update")
+		return nil, postgres.ErrResourceNotFound
+	}
+
+	// Check if name is being updated and if it conflicts with another product
+	if dto.Name != nil && *dto.Name != existingProduct.Name {
+		conflictingProduct, err := s.repo.GetByName(ctx, *dto.Name)
+		if err != nil {
+			s.logger.Error().Err(err).Msg("Error checking for conflicting product name")
+			return nil, fmt.Errorf("error checking for conflicting product name: %w", err)
+		}
+
+		if conflictingProduct != nil && conflictingProduct.ID != id {
+			s.logger.Warn().
+				Str("product_id", id.String()).
+				Str("conflicting_name", *dto.Name).
+				Str("conflicting_id", conflictingProduct.ID.String()).
+				Msg("Product name conflicts with existing product")
+			return nil, fmt.Errorf("a product with the name '%s' already exists", *dto.Name)
+		}
+	}
+
+	// Track if options are changing from empty to having values
+	oldOptionsEmpty := len(existingProduct.Options) == 0
+	var newOptionsEmpty bool
+	var optionsChanged bool
+
+	if dto.Options != nil {
+		newOptionsEmpty = len(*dto.Options) == 0
+		optionsChanged = true
+	} else {
+		newOptionsEmpty = oldOptionsEmpty
+	}
+
+	// Track if allow_subscription is changing to true
+	var subscriptionEnabled bool
+	if dto.AllowSubscription != nil {
+		subscriptionEnabled = *dto.AllowSubscription
+	} else {
+		subscriptionEnabled = existingProduct.AllowSubscription
+	}
+
+	// Apply the updates to the existing product
+	dto.ApplyToModel(existingProduct)
+
+	// Update the product in the database
+	err = s.repo.Update(ctx, existingProduct)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to update product in database")
+		return nil, fmt.Errorf("failed to update product: %w", err)
+	}
+
+	// Check if we need to trigger variant creation
+	shouldCreateVariants := false
+	
+	// Case 1: Product now has options and allows subscription (and previously had no options)
+	if oldOptionsEmpty && !newOptionsEmpty && subscriptionEnabled {
+		shouldCreateVariants = true
+		s.logger.Info().
+			Str("product_id", id.String()).
+			Msg("Product now has options and allows subscription - will trigger variant creation")
+	}
+	
+	// Case 2: Product had no options, now has options (regardless of subscription)
+	if oldOptionsEmpty && !newOptionsEmpty {
+		shouldCreateVariants = true
+		s.logger.Info().
+			Str("product_id", id.String()).
+			Msg("Product now has options - will trigger variant creation")
+	}
+
+	// Publish product updated event
+	payload := events.ProductUpdatedPayload{
+		ProductID:         existingProduct.ID.String(),
+		Name:              existingProduct.Name,
+		Description:       existingProduct.Description,
+		ImageURL:          existingProduct.ImageURL,
+		StockLevel:        existingProduct.StockLevel,
+		Weight:            existingProduct.Weight,
+		Origin:            existingProduct.Origin,
+		RoastLevel:        existingProduct.RoastLevel,
+		FlavorNotes:       existingProduct.FlavorNotes,
+		Options:           existingProduct.Options,
+		AllowSubscription: existingProduct.AllowSubscription,
+		Active:            existingProduct.Active,
+		Archived:          existingProduct.Archived,
+		UpdatedAt:         existingProduct.UpdatedAt,
+		OptionsChanged:    optionsChanged,
+		ShouldCreateVariants: shouldCreateVariants,
+	}
+
+	err = s.eventBus.Publish(events.TopicProductUpdated, payload)
+	if err != nil {
+		s.logger.Error().Err(err).
+			Str("product_id", id.String()).
+			Msg("Failed to publish product updated event")
+		// Don't return error since the product was updated successfully
+	}
+
+	s.logger.Info().
+		Str("topic", events.TopicProductUpdated).
+		Str("product_id", existingProduct.ID.String()).
+		Bool("options_changed", optionsChanged).
+		Bool("should_create_variants", shouldCreateVariants).
+		Msg("Published product updated event")
+
+	return existingProduct, nil
+}
+
 // Archive soft deletes a product by marking it as archived
 func (s *productService) Archive(ctx context.Context, id uuid.UUID) error {
 	s.logger.Info().

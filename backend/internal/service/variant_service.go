@@ -50,6 +50,16 @@ func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variant
 		subLogger.Error().Err(err).Msg("Failed to subscribe to product created events")
 		return nil, err
 	}
+	subLogger.Info().Str("topic", events.TopicProductCreated).Msg("Subscribed to product created events")
+
+	// Subscribe to product updated events
+	_, err = eventBus.Subscribe(events.TopicProductUpdated, s.handleProductUpdated)
+	if err != nil {
+		subLogger.Error().Err(err).Msg("Failed to subscribe to product updated events")
+		return nil, err
+	}
+
+	subLogger.Info().Str("topic", events.TopicProductUpdated).Msg("Subscribed to product updated events")
 
 	// Subscribe to variant created events
 	_, err = eventBus.Subscribe(events.TopicVariantQueued, s.handleVariantQueued)
@@ -57,8 +67,8 @@ func NewVariantService(logger *zerolog.Logger, eventBus events.EventBus, variant
 		subLogger.Error().Err(err).Msg("Failed to subscribe to variant queued events")
 		return nil, err
 	}
+	subLogger.Info().Str("topic", events.TopicProductCreated).Msg("Subscribed to variant queued events")
 
-	subLogger.Info().Str("topic", events.TopicProductCreated).Msg("Subscribed to product created events")
 	return s, nil
 }
 
@@ -243,6 +253,135 @@ func (s *variantService) generateOptionCombinations(optionSets [][]string) [][]s
 	}
 
 	return result
+}
+
+// handleProductUpdated is called when a product updated event is received
+func (s *variantService) handleProductUpdated(data []byte) {
+	s.logger.Info().Str("topic", events.TopicProductUpdated).Msg("Received product updated event")
+
+	// Parse the event
+	var event events.Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to unmarshal product updated event")
+		return
+	}
+
+	// Unmarshal the payload to get product details
+	var payload events.ProductUpdatedPayload
+	payloadData, err := json.Marshal(event.Payload)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to marshal payload for unmarshaling")
+		return
+	}
+
+	if err := json.Unmarshal(payloadData, &payload); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to unmarshal product updated payload")
+		return
+	}
+
+	// Log the received product details
+	s.logger.Debug().
+		Str("product_id", payload.ProductID).
+		Str("name", payload.Name).
+		Interface("options", payload.Options).
+		Bool("allow_subscription", payload.AllowSubscription).
+		Bool("options_changed", payload.OptionsChanged).
+		Bool("should_create_variants", payload.ShouldCreateVariants).
+		Msg("Processing product updated event")
+
+	// Only process if we should create variants
+	if !payload.ShouldCreateVariants {
+		s.logger.Debug().
+			Str("product_id", payload.ProductID).
+			Msg("Product update does not require variant creation")
+		return
+	}
+
+	// Check if product has options
+	if payload.Options == nil || len(payload.Options) == 0 {
+		s.logger.Info().Str("product_id", payload.ProductID).
+			Msg("Product has no options after update, creating single default variant")
+
+		// Create a single default variant
+		err := s.createDefaultVariant(payload.ProductID)
+		if err != nil {
+			s.logger.Error().Err(err).
+				Str("product_id", payload.ProductID).
+				Msg("Failed to create default variant for updated product")
+		}
+		return
+	}
+
+	// Product has options, need to create variants for all combinations
+	// Collect all option sets
+	optionSets := make([][]string, 0, len(payload.Options))
+	optionKeys := make([]string, 0, len(payload.Options))
+
+	// Log all option keys and values
+	for key, values := range payload.Options {
+		if len(values) == 0 {
+			s.logger.Warn().
+				Str("product_id", payload.ProductID).
+				Str("option_key", key).
+				Msg("Option key has no values, skipping")
+			continue
+		}
+
+		s.logger.Debug().
+			Str("product_id", payload.ProductID).
+			Str("option_key", key).
+			Strs("option_values", values).
+			Msg("Processing option set from updated product")
+
+		optionSets = append(optionSets, values)
+		optionKeys = append(optionKeys, key)
+	}
+
+	// Check if we have any valid option sets
+	if len(optionSets) == 0 {
+		s.logger.Info().
+			Str("product_id", payload.ProductID).
+			Msg("No valid options found in updated product, creating single default variant")
+
+		// Create a single default variant
+		err := s.createDefaultVariant(payload.ProductID)
+		if err != nil {
+			s.logger.Error().Err(err).
+				Str("product_id", payload.ProductID).
+				Msg("Failed to create default variant for updated product")
+		}
+		return
+	}
+
+	// Generate all combinations of options
+	combinations := s.generateOptionCombinations(optionSets)
+
+	// Log the number of variants to be created
+	s.logger.Info().
+		Str("product_id", payload.ProductID).
+		Int("option_sets", len(optionSets)).
+		Int("total_combinations", len(combinations)).
+		Msg("Updated product has options - will create variants for all combinations")
+
+	// Convert the ProductUpdatedPayload to a ProductCreatedPayload format for reuse
+	createdPayload := events.ProductCreatedPayload{
+		ProductID:         payload.ProductID,
+		Name:              payload.Name,
+		Description:       payload.Description,
+		ImageURL:          payload.ImageURL,
+		StockLevel:        payload.StockLevel,
+		Weight:            payload.Weight,
+		Origin:            payload.Origin,
+		RoastLevel:        payload.RoastLevel,
+		FlavorNotes:       payload.FlavorNotes,
+		Options:           payload.Options,
+		AllowSubscription: payload.AllowSubscription,
+		Active:            payload.Active,
+		CreatedAt:         payload.UpdatedAt, // Use updated time as created time for variants
+	}
+
+	// Queue variant creation
+	s.queueVariantCreation(payload.ProductID, optionKeys, combinations, createdPayload)
 }
 
 // queueVariantCreation publishes events for each variant combination to be created

@@ -31,6 +31,36 @@ type ProductCreatedPayload struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+
+// ProductUpdatedPayload represents the data in a product.updated event
+type ProductUpdatedPayload struct {
+	// Core identifiers
+	ProductID string `json:"product_id"`
+
+	// Base product information
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ImageURL    string `json:"image_url"`
+
+	// Product details
+	StockLevel  int    `json:"stock_level"`
+	Weight      int    `json:"weight"` // Base weight in grams
+	Origin      string `json:"origin"`
+	RoastLevel  string `json:"roast_level"`
+	FlavorNotes string `json:"flavor_notes"`
+
+	// Product configuration
+	Options           map[string][]string `json:"options"` // Available options (weights, grinds)
+	AllowSubscription bool                `json:"allow_subscription"`
+	Active            bool                `json:"active"`
+	Archived          bool                `json:"archived"`
+
+	// Update metadata
+	UpdatedAt            time.Time `json:"updated_at"`
+	OptionsChanged       bool      `json:"options_changed"`        // Whether options were modified
+	ShouldCreateVariants bool      `json:"should_create_variants"` // Whether this update should trigger variant creation
+}
+
 // ProductStockUpdatedPayload represents the data in a product.stock_updated event
 type ProductStockUpdatedPayload struct {
 	ProductID     string    `json:"product_id"`
