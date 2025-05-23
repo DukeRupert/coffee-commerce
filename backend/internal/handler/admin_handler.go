@@ -3,8 +3,6 @@ package handler
 
 import (
 	"net/http"
-
-	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog"
@@ -57,7 +55,7 @@ func (h *adminHandler) SyncStripeProductIDs(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Failed to sync Stripe product IDs")
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to sync Stripe product IDs",
 			Code:    "SYNC_FAILED",

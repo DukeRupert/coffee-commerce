@@ -4,7 +4,6 @@ package handler
 import (
 	"net/http"
 
-	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -58,7 +57,7 @@ func (h *variantHandler) ListByProduct(c echo.Context) error {
 			Str("product_id", productIDParam).
 			Msg("Invalid product ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid product ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -74,7 +73,7 @@ func (h *variantHandler) ListByProduct(c echo.Context) error {
 			Str("product_id", productID.String()).
 			Msg("Error checking if product exists")
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to retrieve product information",
 			Code:    "INTERNAL_ERROR",
@@ -87,7 +86,7 @@ func (h *variantHandler) ListByProduct(c echo.Context) error {
 			Str("product_id", productID.String()).
 			Msg("Product not found")
 
-		return c.JSON(http.StatusNotFound, api.ErrorResponse{
+		return c.JSON(http.StatusNotFound, ErrorResponse{
 			Status:  http.StatusNotFound,
 			Message: "Product not found",
 			Code:    "PRODUCT_NOT_FOUND",
@@ -103,7 +102,7 @@ func (h *variantHandler) ListByProduct(c echo.Context) error {
 			Str("product_id", productID.String()).
 			Msg("Failed to retrieve variants")
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to retrieve variants",
 			Code:    "INTERNAL_ERROR",

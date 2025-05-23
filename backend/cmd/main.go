@@ -7,19 +7,14 @@ import (
 	"os"
 
 	"github.com/dukerupert/coffee-commerce/config"
-	"github.com/dukerupert/coffee-commerce/internal/api/handler"
-	events "github.com/dukerupert/coffee-commerce/internal/event"
+	"github.com/dukerupert/coffee-commerce/internal/api"
+	"github.com/dukerupert/coffee-commerce/internal/events"
 	"github.com/dukerupert/coffee-commerce/internal/metrics"
-	custommiddleware "github.com/dukerupert/coffee-commerce/internal/middleware"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
-	"github.com/dukerupert/coffee-commerce/internal/service"
-	"github.com/dukerupert/coffee-commerce/internal/stripe"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
@@ -96,84 +91,9 @@ func main() {
 		}()).
 		Msg("Stripe configuration loaded")
 
-	// Initialize repositories
-	productRepo := postgres.NewProductRepository(db, &logger)
-	variantRepo := postgres.NewVariantRepository(db, &logger)
-	priceRepo := postgres.NewPriceRepository(db, &logger)
-	syncRepo := postgres.NewSyncHashRepository(db, &logger)
-
-	// Initialize services
-	stripeService := stripe.NewStripeService(&logger, &cfg.Stripe)
-	productService := service.NewProductService(&logger, eventBus, productRepo)
-	priceService := service.NewPriceService(&logger, eventBus, priceRepo, productRepo, variantRepo, stripeService)
-	_, err = service.NewVariantService(&logger, eventBus, variantRepo, productRepo, priceRepo, stripeService)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to initialize variant service")
-	}
-
-	// Initialize handlers
-	productHandler := handler.NewProductHandler(&logger, productService, variantRepo, priceRepo)
-	variantHandler := handler.NewVariantHandler(&logger, variantRepo, productRepo)
-	priceHandler := handler.NewPriceHandler(&logger, priceService, productRepo, variantRepo)
-	stripeWebhookHandler := handler.NewStripeWebhookHandler(&logger, &cfg.Stripe, eventBus, productRepo, priceRepo, variantRepo, syncRepo)
-	adminHandler := handler.NewAdminHandler(&logger, priceService, productRepo)
-
 	// Start echo server
-	e := echo.New()
-
-	// middleware
-	e.Use(middleware.RequestID())
-	e.Use(custommiddleware.RequestLogger(&logger))
-	corsConfig := custommiddleware.CORSConfig{
-		AllowOrigins: []string{
-			"https://orange-goldfish-wg644q6vqxv295gg-5173.app.github.dev", // Your frontend origin
-			"http://localhost:5173", // Local development
-			"*",                     // Allow all origins (for development)
-		},
-		AllowMethods: []string{
-			echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.PATCH, echo.OPTIONS,
-		},
-	}
-	e.Use(custommiddleware.SetupCORS(corsConfig))
-
-	api := e.Group("/api")
-	v1 := api.Group("/v1")
-	v1.POST("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
-
-	// Existing routes
-	products := v1.Group("/products")
-	products.GET("", productHandler.List)
-	products.POST("", productHandler.Create)
-	products.GET("/:id", productHandler.Get)
-	products.DELETE("/:id", productHandler.Delete)
-	products.GET("/:id/variants", variantHandler.ListByProduct)
-	products.POST("/:id/archive", productHandler.Archive)
-
-	// Add product prices route
-	products.GET("/:id/prices", priceHandler.GetByProduct)
-
-	// Add price routes
-	prices := v1.Group("/prices")
-	prices.POST("", priceHandler.Create)
-	prices.GET("/:id", priceHandler.Get)
-	prices.PUT("/:id", priceHandler.Update)
-	prices.DELETE("/:id", priceHandler.Delete)
-	prices.GET("/:id/variants", priceHandler.GetVariantsByPrice)
-
-	// Add variant price assignment route
-	variants := v1.Group("/variants")
-	variants.POST("/:id/assign-price", priceHandler.AssignToVariant)
-
-	// Admin routes (add these)
-	admin := v1.Group("/admin")
-	admin.GET("/health", adminHandler.HealthCheck)
-	admin.POST("/sync-stripe-ids", adminHandler.SyncStripeProductIDs)
-
-	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "Hello, World!")
-	})
-
-	e.Logger.Fatal(e.Start(":8080"))
+	s := api.NewServer(cfg, db, eventBus, &logger)
+	s.Start(cfg.App.Port)
 }
 
 func runMigrations(cfg *config.Config, logger *zerolog.Logger) error {

@@ -1,5 +1,5 @@
-// internal/api/pagination.go
-package api
+// internal/handler/pagination.go
+package handler
 
 import (
 	"strconv"

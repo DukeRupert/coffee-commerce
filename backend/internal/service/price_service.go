@@ -9,7 +9,7 @@ import (
 
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
-	events "github.com/dukerupert/coffee-commerce/internal/event"
+	"github.com/dukerupert/coffee-commerce/internal/events"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
 	"github.com/google/uuid"

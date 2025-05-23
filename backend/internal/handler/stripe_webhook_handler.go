@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/dukerupert/coffee-commerce/config"
-	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/domain/model"
-	events "github.com/dukerupert/coffee-commerce/internal/event"
+	"github.com/dukerupert/coffee-commerce/internal/events"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/dukerupert/coffee-commerce/internal/sync"
 	"github.com/google/uuid"
@@ -61,7 +60,7 @@ func (h *StripeWebhookHandler) HandleWebhook(c echo.Context) error {
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to read webhook request body")
-		return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+		return c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 			Status:  http.StatusServiceUnavailable,
 			Message: "Failed to read request body",
 		})
@@ -71,7 +70,7 @@ func (h *StripeWebhookHandler) HandleWebhook(c echo.Context) error {
 	signatureHeader := c.Request().Header.Get("Stripe-Signature")
 	if signatureHeader == "" {
 		h.logger.Warn().Msg("Missing Stripe-Signature header")
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Missing Stripe-Signature header",
 		})
@@ -81,7 +80,7 @@ func (h *StripeWebhookHandler) HandleWebhook(c echo.Context) error {
 	event, err := webhook.ConstructEvent(body, signatureHeader, h.stripeConfig.WebhookSecret)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to verify webhook signature")
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Failed to verify webhook signature",
 		})

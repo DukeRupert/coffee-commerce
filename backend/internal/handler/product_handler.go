@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
@@ -67,7 +66,7 @@ func (h *productHandler) Create(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Failed to parse request body")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Message: "Invalid request format",
 			Code:    "INVALID_FORMAT",
 		})
@@ -86,7 +85,7 @@ func (h *productHandler) Create(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Product validation failed")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Message:          "Validation failed",
 			ValidationErrors: validationErrors,
 			Code:             "VALIDATION_ERROR",
@@ -104,7 +103,7 @@ func (h *productHandler) Create(c echo.Context) error {
 		// Handle specific error types
 		switch {
 		case errors.Is(err, postgres.ErrDuplicateName):
-			return c.JSON(http.StatusConflict, api.ErrorResponse{
+			return c.JSON(http.StatusConflict, ErrorResponse{
 				Message: "A product with this name already exists",
 				Code:    "DUPLICATE_PRODUCT",
 				ValidationErrors: map[string]string{
@@ -113,20 +112,20 @@ func (h *productHandler) Create(c echo.Context) error {
 			})
 
 		case errors.Is(err, postgres.ErrDatabaseConnection):
-			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+			return c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 				Message: "Service temporarily unavailable, please try again later",
 				Code:    "SERVICE_UNAVAILABLE",
 			})
 
 		case errors.Is(err, service.ErrInsufficientPermissions):
-			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+			return c.JSON(http.StatusForbidden, ErrorResponse{
 				Message: "You don't have permission to create products",
 				Code:    "FORBIDDEN",
 			})
 
 		default:
 			// Generic server error
-			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			return c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Message: "Failed to create product",
 				Code:    "INTERNAL_ERROR",
 			})
@@ -166,7 +165,7 @@ func (h *productHandler) Get(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid product ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid product ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -183,14 +182,14 @@ func (h *productHandler) Get(c echo.Context) error {
 			Msg("Failed to retrieve product")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Product not found",
 				Code:    "PRODUCT_NOT_FOUND",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to retrieve product",
 			Code:    "INTERNAL_ERROR",
@@ -272,7 +271,7 @@ func (h *productHandler) List(c echo.Context) error {
 		Msg("Handling product listing request")
 
 	// 1. Parse pagination parameters
-	params := api.NewParams(c)
+	params := NewParams(c)
 
 	// 2. Parse additional filtering parameters
 	includeInactive := false
@@ -313,8 +312,8 @@ func (h *productHandler) List(c echo.Context) error {
 	}
 
 	// 3. Create paginated response
-	meta := api.NewMeta(params, total)
-	response := api.Response(products, meta)
+	meta := NewMeta(params, total)
+	response := Response(products, meta)
 
 	h.logger.Info().
 		Str("handler", "ProductHandler.List").
@@ -355,7 +354,7 @@ func (h *productHandler) Update(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid product ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid product ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -370,7 +369,7 @@ func (h *productHandler) Update(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Failed to parse request body")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid request format",
 			Code:    "INVALID_FORMAT",
@@ -385,7 +384,7 @@ func (h *productHandler) Update(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Product update validation failed")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:           http.StatusBadRequest,
 			Message:          "Validation failed",
 			ValidationErrors: validationErrors,
@@ -405,14 +404,14 @@ func (h *productHandler) Update(c echo.Context) error {
 		// Handle specific error types
 		switch {
 		case errors.Is(err, postgres.ErrResourceNotFound):
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Product not found",
 				Code:    "PRODUCT_NOT_FOUND",
 			})
 
 		case errors.Is(err, postgres.ErrDuplicateName):
-			return c.JSON(http.StatusConflict, api.ErrorResponse{
+			return c.JSON(http.StatusConflict, ErrorResponse{
 				Status:  http.StatusConflict,
 				Message: "A product with this name already exists",
 				Code:    "DUPLICATE_PRODUCT",
@@ -422,14 +421,14 @@ func (h *productHandler) Update(c echo.Context) error {
 			})
 
 		case errors.Is(err, service.ErrInsufficientPermissions):
-			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+			return c.JSON(http.StatusForbidden, ErrorResponse{
 				Status:  http.StatusForbidden,
 				Message: "You don't have permission to update this product",
 				Code:    "FORBIDDEN",
 			})
 
 		case errors.Is(err, postgres.ErrDatabaseConnection):
-			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+			return c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 				Status:  http.StatusServiceUnavailable,
 				Message: "Service temporarily unavailable, please try again later",
 				Code:    "SERVICE_UNAVAILABLE",
@@ -437,7 +436,7 @@ func (h *productHandler) Update(c echo.Context) error {
 
 		default:
 			// Generic server error
-			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			return c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Status:  http.StatusInternalServerError,
 				Message: "Failed to update product",
 				Code:    "INTERNAL_ERROR",
@@ -487,7 +486,7 @@ func (h *productHandler) Archive(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid product ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid product ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -506,14 +505,14 @@ func (h *productHandler) Archive(c echo.Context) error {
 		// Handle specific error types
 		switch {
 		case errors.Is(err, postgres.ErrResourceNotFound):
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Product not found",
 				Code:    "PRODUCT_NOT_FOUND",
 			})
 
 		case errors.Is(err, service.ErrInsufficientPermissions):
-			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+			return c.JSON(http.StatusForbidden, ErrorResponse{
 				Status:  http.StatusForbidden,
 				Message: "You don't have permission to archive this product",
 				Code:    "FORBIDDEN",
@@ -521,7 +520,7 @@ func (h *productHandler) Archive(c echo.Context) error {
 
 		default:
 			// Generic server error
-			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			return c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Status:  http.StatusInternalServerError,
 				Message: "Failed to archive product",
 				Code:    "INTERNAL_ERROR",
@@ -572,7 +571,7 @@ func (h *productHandler) Delete(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid product ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid product ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -611,21 +610,21 @@ func (h *productHandler) Delete(c echo.Context) error {
 		// Handle specific error types
 		switch {
 		case errors.Is(err, postgres.ErrResourceNotFound):
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Product not found",
 				Code:    "PRODUCT_NOT_FOUND",
 			})
 
 		case errors.Is(err, service.ErrInsufficientPermissions):
-			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+			return c.JSON(http.StatusForbidden, ErrorResponse{
 				Status:  http.StatusForbidden,
 				Message: "You don't have permission to delete this product",
 				Code:    "FORBIDDEN",
 			})
 			
 		case errors.Is(err, postgres.ErrDatabaseConnection):
-			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+			return c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 				Status:  http.StatusServiceUnavailable,
 				Message: "Service temporarily unavailable, please try again later",
 				Code:    "SERVICE_UNAVAILABLE",
@@ -635,7 +634,7 @@ func (h *productHandler) Delete(c echo.Context) error {
 			// If it's a foreign key constraint error (common with hard delete), 
 			// suggest using archive instead
 			if hardDelete {
-				return c.JSON(http.StatusConflict, api.ErrorResponse{
+				return c.JSON(http.StatusConflict, ErrorResponse{
 					Status:  http.StatusConflict,
 					Message: "This product cannot be hard deleted because it has associated records. Use archive instead.",
 					Code:    "FOREIGN_KEY_CONSTRAINT",
@@ -643,7 +642,7 @@ func (h *productHandler) Delete(c echo.Context) error {
 			}
 			
 			// Generic server error
-			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			return c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Status:  http.StatusInternalServerError,
 				Message: "Failed to remove product",
 				Code:    "INTERNAL_ERROR",

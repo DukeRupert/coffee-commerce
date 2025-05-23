@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/dukerupert/coffee-commerce/internal/api"
 	"github.com/dukerupert/coffee-commerce/internal/domain/dto"
 	"github.com/dukerupert/coffee-commerce/internal/interfaces"
 	"github.com/dukerupert/coffee-commerce/internal/repository/postgres"
@@ -70,7 +69,7 @@ func (h *priceHandler) Create(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Failed to parse request body")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid request format",
 			Code:    "INVALID_FORMAT",
@@ -85,7 +84,7 @@ func (h *priceHandler) Create(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Price validation failed")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:           http.StatusBadRequest,
 			Message:          "Validation failed",
 			ValidationErrors: validationErrors,
@@ -105,28 +104,28 @@ func (h *priceHandler) Create(c echo.Context) error {
 		// Handle specific error types
 		switch {
 		case errors.Is(err, postgres.ErrResourceNotFound):
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Product not found",
 				Code:    "PRODUCT_NOT_FOUND",
 			})
 
 		case errors.Is(err, postgres.ErrDatabaseConnection):
-			return c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{
+			return c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 				Status:  http.StatusServiceUnavailable,
 				Message: "Service temporarily unavailable, please try again later",
 				Code:    "SERVICE_UNAVAILABLE",
 			})
 
 		case errors.Is(err, service.ErrInsufficientPermissions):
-			return c.JSON(http.StatusForbidden, api.ErrorResponse{
+			return c.JSON(http.StatusForbidden, ErrorResponse{
 				Status:  http.StatusForbidden,
 				Message: "You don't have permission to create prices",
 				Code:    "FORBIDDEN",
 			})
 
 		default:
-			return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			return c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Status:  http.StatusInternalServerError,
 				Message: "Failed to create price",
 				Code:    "INTERNAL_ERROR",
@@ -169,7 +168,7 @@ func (h *priceHandler) Get(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid price ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid price ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -186,14 +185,14 @@ func (h *priceHandler) Get(c echo.Context) error {
 			Msg("Failed to retrieve price")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Price not found",
 				Code:    "PRICE_NOT_FOUND",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to retrieve price",
 			Code:    "INTERNAL_ERROR",
@@ -234,7 +233,7 @@ func (h *priceHandler) GetByProduct(c echo.Context) error {
 			Str("product_id", productIDParam).
 			Msg("Invalid product ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid product ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -251,14 +250,14 @@ func (h *priceHandler) GetByProduct(c echo.Context) error {
 			Msg("Failed to retrieve prices for product")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Product not found",
 				Code:    "PRODUCT_NOT_FOUND",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to retrieve prices",
 			Code:    "INTERNAL_ERROR",
@@ -304,7 +303,7 @@ func (h *priceHandler) Update(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid price ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid price ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -319,7 +318,7 @@ func (h *priceHandler) Update(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Failed to parse request body")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid request format",
 			Code:    "INVALID_FORMAT",
@@ -334,7 +333,7 @@ func (h *priceHandler) Update(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Price update validation failed")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:           http.StatusBadRequest,
 			Message:          "Validation failed",
 			ValidationErrors: validationErrors,
@@ -352,14 +351,14 @@ func (h *priceHandler) Update(c echo.Context) error {
 			Msg("Failed to update price")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Price not found",
 				Code:    "PRICE_NOT_FOUND",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to update price",
 			Code:    "INTERNAL_ERROR",
@@ -401,7 +400,7 @@ func (h *priceHandler) Delete(c echo.Context) error {
 			Str("id_param", idParam).
 			Msg("Invalid price ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid price ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -418,7 +417,7 @@ func (h *priceHandler) Delete(c echo.Context) error {
 			Msg("Failed to delete price")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Price not found",
 				Code:    "PRICE_NOT_FOUND",
@@ -428,14 +427,14 @@ func (h *priceHandler) Delete(c echo.Context) error {
 		// Check for foreign key constraint errors (variants using this price)
 		if err.Error() == "cannot delete price: 1 variants are using this price" ||
 			err.Error() == "cannot delete price: 2 variants are using this price" {
-			return c.JSON(http.StatusConflict, api.ErrorResponse{
+			return c.JSON(http.StatusConflict, ErrorResponse{
 				Status:  http.StatusConflict,
 				Message: "Cannot delete price because it is being used by variants",
 				Code:    "PRICE_IN_USE",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to delete price",
 			Code:    "INTERNAL_ERROR",
@@ -473,7 +472,7 @@ func (h *priceHandler) AssignToVariant(c echo.Context) error {
 			Str("variant_id", variantIDParam).
 			Msg("Invalid variant ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid variant ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -490,7 +489,7 @@ func (h *priceHandler) AssignToVariant(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Failed to parse request body")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid request format",
 			Code:    "INVALID_FORMAT",
@@ -511,7 +510,7 @@ func (h *priceHandler) AssignToVariant(c echo.Context) error {
 			Str("request_id", requestID).
 			Msg("Price assignment validation failed")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:           http.StatusBadRequest,
 			Message:          "Validation failed",
 			ValidationErrors: validationErrors,
@@ -530,14 +529,14 @@ func (h *priceHandler) AssignToVariant(c echo.Context) error {
 			Msg("Failed to assign price to variant")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Variant or price not found",
 				Code:    "RESOURCE_NOT_FOUND",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to assign price to variant",
 			Code:    "INTERNAL_ERROR",
@@ -575,7 +574,7 @@ func (h *priceHandler) GetVariantsByPrice(c echo.Context) error {
 			Str("price_id", priceIDParam).
 			Msg("Invalid price ID format")
 
-		return c.JSON(http.StatusBadRequest, api.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Status:  http.StatusBadRequest,
 			Message: "Invalid price ID format",
 			Code:    "INVALID_ID_FORMAT",
@@ -592,14 +591,14 @@ func (h *priceHandler) GetVariantsByPrice(c echo.Context) error {
 			Msg("Failed to retrieve variants for price")
 
 		if errors.Is(err, postgres.ErrResourceNotFound) {
-			return c.JSON(http.StatusNotFound, api.ErrorResponse{
+			return c.JSON(http.StatusNotFound, ErrorResponse{
 				Status:  http.StatusNotFound,
 				Message: "Price not found",
 				Code:    "PRICE_NOT_FOUND",
 			})
 		}
 
-		return c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "Failed to retrieve variants",
 			Code:    "INTERNAL_ERROR",
