@@ -1,5 +1,5 @@
 // CoffeeServiceClient.ts
-import type { CreateProductRequest, ProductWithVariants } from "./interface";
+import type { CreateProductRequest, ProductWithVariants, ProductUpdateRequest } from "./interface";
 import { ApiError, type ApiErrorResponse } from "./error";
 
 /**
@@ -302,32 +302,6 @@ export class CoffeeServiceClient {
   }
 
   /**
-   * Update an existing product
-   * @param productId ID of the product to update
-   * @param productData New data for the product
-   * @returns Promise with the updated product data
-   */
-  public async updateProduct(productId: string, productData: Partial<CreateProductRequest>): Promise<Product> {
-    const url = this.createUrl(`/products/${productId}/`);
-
-    try {
-      const response = await this.fetchImpl(url, {
-        method: 'PUT',
-        headers: this.getHeaders(),
-        body: JSON.stringify(productData),
-        signal: AbortSignal.timeout(this.timeout),
-      });
-
-      return this.handleResponse<Product>(response);
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to update product: ${error.message}`);
-      }
-      throw error;
-    }
-  }
-
-  /**
    * Delete a product
    * @param productId ID of the product to delete
    * @returns Promise with the deletion status
@@ -414,22 +388,58 @@ export class CoffeeServiceClient {
  * @param productId ID of the product to retrieve
  * @returns Promise with the product data including variants
  */
-public async getProduct(productId: string): Promise<ProductWithVariants> {
+  public async getProduct(productId: string): Promise<ProductWithVariants> {
+    const url = this.createUrl(`/products/${productId}`);
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers: this.getHeaders(),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      return this.handleResponse<ProductWithVariants>(response);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch product: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+ * Update an existing product
+ * @param productId ID of the product to update
+ * @param productData New data for the product (only fields to update)
+ * @returns Promise with the updated product data
+ */
+public async updateProduct(productId: string, productData: ProductUpdateRequest): Promise<Product> {
   const url = this.createUrl(`/products/${productId}`);
 
   try {
     const response = await this.fetchImpl(url, {
-      method: 'GET',
+      method: 'PUT', // Use PUT for partial updates
       headers: this.getHeaders(),
+      body: JSON.stringify(productData),
       signal: AbortSignal.timeout(this.timeout),
     });
 
-    return this.handleResponse<ProductWithVariants>(response);
+    return this.handleResponse<Product>(response);
   } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`Failed to fetch product: ${error.message}`);
+    if (error instanceof ApiError) {
+      // Already formatted, just rethrow
+      throw error;
     }
-    throw error;
+    if (error instanceof Error) {
+      throw new ApiError({
+        status: 500,
+        message: `Failed to update product: ${error.message}`
+      });
+    }
+    throw new ApiError({
+      status: 500,
+      message: 'An unknown error occurred'
+    });
   }
 }
 }

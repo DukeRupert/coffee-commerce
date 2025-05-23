@@ -23,6 +23,7 @@ func RegisterRoutes(e *echo.Echo, productHandler handler.ProductHandler, variant
 	products.GET("", productHandler.List)
 	products.POST("", productHandler.Create)
 	products.GET("/:id", productHandler.Get)
+	products.PUT("/:id", productHandler.Update)
 	products.DELETE("/:id", productHandler.Delete)
 	products.GET("/:id/variants", variantHandler.ListByProduct)
 	products.POST("/:id/archive", productHandler.Archive)

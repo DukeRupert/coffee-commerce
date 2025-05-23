@@ -176,3 +176,63 @@ export interface ProductWithVariants {
   };
   variants: ProductVariant[];
 }
+
+/**
+ * Product update request data that matches the backend ProductUpdateDTO
+ */
+export interface ProductUpdateRequest {
+  /**
+   * Product name
+   */
+  name?: string;
+  
+  /**
+   * Product description
+   */
+  description?: string;
+  
+  /**
+   * URL to product image
+   */
+  image_url?: string;
+  
+  /**
+   * Whether the product is active and visible to customers
+   */
+  active?: boolean;
+  
+  /**
+   * Current stock level
+   */
+  stock_level?: number;
+  
+  /**
+   * Weight in grams
+   */
+  weight?: number;
+  
+  /**
+   * Coffee origin (e.g., "Ethiopia, Yirgacheffe")
+   */
+  origin?: string;
+  
+  /**
+   * Roast level (e.g., "Light", "Medium", "Dark")
+   */
+  roast_level?: string;
+  
+  /**
+   * Flavor profile (e.g., "Blueberry, Chocolate, Citrus")
+   */
+  flavor_notes?: string;
+  
+  /**
+   * Product options like available weights and grinds
+   */
+  options?: Record<string, string[]>;
+  
+  /**
+   * Whether this product can be purchased as a subscription
+   */
+  allow_subscription?: boolean;
+}
